@@ -19,6 +19,7 @@ from pydantic import BaseModel, field_validator
 from contracts.task_spec import TaskSpec
 from align.core import parse_answers_to_spec, ALIGN_QUESTIONS
 from orchestrator.loop import run as run_loop
+from orchestrator.maker import make as run_maker
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -59,6 +60,7 @@ class SettingsPayload(BaseModel):
     max_rounds: int = 5
     temperature: float = 0.7
     max_tokens: int = 2048
+    system_prompt: str = ""
     mcp_servers: list[dict] = []
     api_keys: dict[str, str] = {}
 
@@ -117,9 +119,103 @@ def list_models():
     return {"models": ALIASES}
 
 
+def _classify_intent(task: str) -> str:
+    """Returns 'direct' for conversational/simple tasks, 'task' for complex ones."""
+    from router.classifier import llm_classify
+    from router.rules import TaskType
+    t = task.strip()
+
+    # Heuristic fast path — obvious questions
+    lo = t.lower()
+    question_starters = (
+        "什麼", "是什麼", "解釋", "說明", "如何", "為什麼", "怎麼", "請問",
+        "what", "how", "why", "explain", "describe", "summarize", "who", "when", "where",
+        "tell me", "show me",
+    )
+    task_verbs = (
+        "實作", "建立", "實現", "開發", "設計", "寫一個", "建一個", "幫我做",
+        "build", "implement", "create", "develop", "write a", "set up", "deploy",
+    )
+    looks_like_question = (
+        t.endswith("?") or t.endswith("？")
+        or any(lo.startswith(p) or lo.endswith("是什麼") for p in question_starters)
+    )
+    looks_like_task = any(v in lo for v in task_verbs)
+
+    if looks_like_question and not looks_like_task:
+        return "direct"
+
+    # LLM classifier for ambiguous cases
+    try:
+        task_type, confidence = llm_classify(task)
+        if task_type in (TaskType.HIGH_FREQ, TaskType.SUMMARY) and confidence >= 0.5:
+            return "direct"
+        if task_type == TaskType.ARCHITECTURE and confidence >= 0.6:
+            return "task"
+        # Short simple feature requests → direct
+        if task_type == TaskType.FEATURE and confidence >= 0.7 and len(t) < 80:
+            return "direct"
+    except Exception:
+        pass
+
+    # Default: if task is short and doesn't look like a build task → direct
+    if len(t) < 60 and not looks_like_task:
+        return "direct"
+
+    return "task"
+
+
+def _make_direct_spec(task: str) -> TaskSpec:
+    """Minimal spec for a direct-answer task (single Maker pass)."""
+    return TaskSpec(
+        why=task,
+        io_example={"input": task, "expected_output": "clear helpful response"},
+        taste=[],
+        boundaries=[],
+        stop_on_metric="quality",
+        max_rounds=1,
+    )
+
+
+@app.post("/chat")
+async def chat_endpoint(req: TaskRequest):
+    """Smart routing: direct answer or alignment flow."""
+    session_id = str(uuid.uuid4())[:8]
+    intent = _classify_intent(req.task)
+
+    if intent == "direct":
+        spec = _make_direct_spec(req.task)
+        sessions[session_id] = {"raw_task": req.task, "status": "running", "spec": spec.model_dump()}
+        asyncio.create_task(_run_direct_and_push(session_id, spec))
+        return {"session_id": session_id, "mode": "direct"}
+    else:
+        sessions[session_id] = {"raw_task": req.task, "status": "aligning"}
+        return {"session_id": session_id, "mode": "align", "questions": ALIGN_QUESTIONS}
+
+
+async def _run_direct_and_push(session_id: str, spec: TaskSpec):
+    """Single Maker call — no checker loop. For conversational / simple tasks."""
+    loop = asyncio.get_event_loop()
+
+    def on_token(token: str):
+        asyncio.run_coroutine_threadsafe(push(session_id, "token", {"text": token}), loop)
+
+    try:
+        output = await asyncio.to_thread(run_maker, spec, "", 1, on_token)
+        sessions[session_id]["status"] = "done"
+        sessions[session_id]["output"] = output
+        await push(session_id, "result", {
+            "status": "done", "output": output,
+            "rounds": 1, "final_score": None, "history": [],
+        })
+    except Exception as e:
+        await push(session_id, "error", {"msg": str(e)})
+        sessions[session_id]["status"] = "error"
+
+
 @app.post("/task/submit")
 async def submit_task(req: TaskRequest):
-    """P Gate step 1: receive raw task, return align questions for frontend."""
+    """Legacy: P Gate step 1. Prefer /chat for new callers."""
     session_id = str(uuid.uuid4())[:8]
     sessions[session_id] = {"raw_task": req.task, "status": "aligning"}
     return {"session_id": session_id, "questions": ALIGN_QUESTIONS}

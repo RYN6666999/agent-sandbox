@@ -1,5 +1,18 @@
 const BASE = "http://localhost:8000";
 
+export async function chatTask(task: string): Promise<{
+  session_id: string;
+  mode: "direct" | "align";
+  questions?: { key: string; q: string }[];
+}> {
+  const r = await fetch(`${BASE}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task }),
+  });
+  return r.json();
+}
+
 export async function submitTask(task: string) {
   const r = await fetch(`${BASE}/task/submit`, {
     method: "POST",
@@ -65,6 +78,7 @@ export interface AppSettings {
   max_rounds: number;
   temperature: number;
   max_tokens: number;
+  system_prompt: string;
   mcp_servers: McpServer[];
   api_keys: Record<string, string>;
 }

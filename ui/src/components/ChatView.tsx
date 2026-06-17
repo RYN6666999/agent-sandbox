@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
-import { submitTask, approveTask, deliverTask, openWs } from "../api";
+import { chatTask, approveTask, deliverTask, openWs } from "../api";
 import { useStore } from "../store";
 
 export function ChatView() {
@@ -14,6 +14,52 @@ export function ChatView() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [task?.messages]);
+
+  function attachWs(tid: string, sessionId: string) {
+    wsRef.current?.close();
+    wsRef.current = openWs(sessionId, (e) => {
+      const cur = () => useStore.getState().tasks.find((x) => x.id === tid)!;
+
+      if (e.event === "status") {
+        useStore.getState().updateTask(tid, { logs: [...(cur().logs ?? []), (e.data as { msg: string }).msg] });
+      }
+      if (e.event === "round_start") {
+        const round = (e.data as { round: number }).round;
+        useStore.getState().updateTask(tid, {
+          messages: [...cur().messages, { role: "system" as const, text: `**Round ${round}** — 生成中…\n\n` }],
+        });
+      }
+      if (e.event === "token") {
+        const token = (e.data as { text: string }).text;
+        const msgs = [...cur().messages];
+        const lastIdx = msgs.length - 1;
+        if (lastIdx >= 0 && msgs[lastIdx].role === "system") {
+          msgs[lastIdx] = { ...msgs[lastIdx], text: msgs[lastIdx].text + token };
+        } else {
+          msgs.push({ role: "system", text: token });
+        }
+        useStore.getState().updateTask(tid, { messages: msgs });
+      }
+      if (e.event === "result") {
+        const r = e.data as { status: string; output: string; rounds: number; final_score: number | null; history: unknown[] };
+        const label = r.status === "done" ? "✓ 完成" : r.status === "escalate" ? "⚠ 需介入" : "結果";
+        const scoreText = r.final_score != null ? ` · 得分 ${r.final_score.toFixed(1)} / 10` : "";
+        useStore.getState().updateTask(tid, {
+          output: r.output,
+          history: r.history as import("../store").HistoryEntry[],
+          finalScore: r.final_score,
+          status: r.status as import("../store").AppStatus,
+          messages: [...cur().messages, { role: "system", text: `${label}${scoreText}` }],
+        });
+      }
+      if (e.event === "error") {
+        useStore.getState().updateTask(tid, {
+          status: "error",
+          messages: [...cur().messages, { role: "system", text: `錯誤：${(e.data as { msg: string }).msg}` }],
+        });
+      }
+    });
+  }
 
   async function handleSubmit() {
     if (!input.trim()) return;
@@ -29,16 +75,29 @@ export function ChatView() {
     useStore.getState().updateTask(tid, {
       title: taskText.slice(0, 28) + (taskText.length > 28 ? "…" : ""),
       messages: [...t.messages, { role: "user", text: taskText }],
-      status: "aligning",
+      status: "running", // optimistically show as running during classification
     });
 
-    const res = await submitTask(taskText);
-    useStore.getState().updateTask(tid, {
-      sessionId: res.session_id,
-      questions: res.questions,
-      messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
-        { role: "system", text: "好，對齊一下。請回答以下問題：" }],
-    });
+    const res = await chatTask(taskText);
+
+    if (res.mode === "direct") {
+      // Backend already started running — just connect WS and stream
+      useStore.getState().updateTask(tid, {
+        sessionId: res.session_id,
+        messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
+          { role: "system", text: "" }], // placeholder for streaming
+      });
+      attachWs(tid, res.session_id);
+    } else {
+      // Complex task — show alignment form
+      useStore.getState().updateTask(tid, {
+        sessionId: res.session_id,
+        questions: res.questions ?? [],
+        status: "aligning",
+        messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
+          { role: "system", text: "這個任務比較複雜，對齊一下讓我更好地完成它：" }],
+      });
+    }
   }
 
   async function handleApprove() {
@@ -49,55 +108,12 @@ export function ChatView() {
     useStore.getState().updateTask(tid, {
       messages: [...t.messages,
         { role: "user", text: "確認開工" },
-        { role: "system", text: "Maker/Checker 循環啟動中…" },
+        { role: "system", text: "Maker/Checker 循環啟動中…\n\n" },
       ],
       status: "running",
     });
 
-    wsRef.current?.close();
-    wsRef.current = openWs(t.sessionId, (e) => {
-      const cur = () => useStore.getState().tasks.find((x) => x.id === tid)!;
-
-      if (e.event === "status") {
-        useStore.getState().updateTask(tid, { logs: [...cur().logs, (e.data as { msg: string }).msg] });
-      }
-      if (e.event === "round_start") {
-        const round = (e.data as { round: number }).round;
-        useStore.getState().updateTask(tid, {
-          messages: [...cur().messages,
-            { role: "system" as const, text: `**Round ${round}** — 生成中…\n\n` }],
-        });
-      }
-      if (e.event === "token") {
-        const token = (e.data as { text: string }).text;
-        const msgs = cur().messages;
-        const updated = [...msgs];
-        const lastIdx = updated.length - 1;
-        if (lastIdx >= 0 && updated[lastIdx].role === "system") {
-          updated[lastIdx] = { ...updated[lastIdx], text: updated[lastIdx].text + token };
-        }
-        useStore.getState().updateTask(tid, { messages: updated });
-      }
-      if (e.event === "result") {
-        const r = e.data as { output: string; history: { round: number; score: number; passed: boolean; feedback: string }[]; final_score: number; status: string };
-        const label = r.status === "done" ? "完成" : "需要人工介入";
-        useStore.getState().updateTask(tid, {
-          output: r.output,
-          history: r.history,
-          finalScore: r.final_score,
-          status: r.status as import("../store").AppStatus,
-          messages: [...cur().messages,
-            { role: "system", text: `${label} · 得分 ${r.final_score?.toFixed(1)} / 10` }],
-        });
-      }
-      if (e.event === "error") {
-        useStore.getState().updateTask(tid, {
-          status: "error",
-          messages: [...cur().messages, { role: "system", text: `錯誤：${(e.data as { msg: string }).msg}` }],
-        });
-      }
-    });
-
+    attachWs(tid, t.sessionId);
     await approveTask(t.sessionId, t.answers);
   }
 

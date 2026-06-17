@@ -1,4 +1,4 @@
-"""Tests for /converse endpoint — chat path, no task routing."""
+"""Tests for /converse endpoint — blocking chat path, no task routing."""
 from unittest.mock import patch, MagicMock
 import pytest
 from fastapi.testclient import TestClient
@@ -11,42 +11,66 @@ from api.main import app
 
 client = TestClient(app)
 
+REPLY_TEXT = "這是閒聊回應"
 
-def _mock_litellm(content: str = "這是閒聊回應"):
-    """Build a mock streaming litellm response."""
-    chunk = MagicMock()
-    chunk.choices = [MagicMock()]
-    chunk.choices[0].delta.content = content
-    return iter([chunk])
+
+def _mock_litellm(content: str = REPLY_TEXT):
+    """Mock non-streaming litellm response."""
+    resp = MagicMock()
+    resp.choices = [MagicMock()]
+    resp.choices[0].message.content = content
+    return resp
+
+
+# ── /converse returns reply in HTTP body ──────────────────────────────────────
+
+class TestConverseHttpReply:
+    def test_reply_in_body(self):
+        with patch("litellm.completion", return_value=_mock_litellm()):
+            r = client.post("/converse", json={"message": "你好", "history": []})
+        assert r.status_code == 200
+        assert r.json()["mode"] == "converse"
+        assert r.json()["reply"] == REPLY_TEXT
+
+    def test_no_session_id_in_response(self):
+        """Blocking path — no WS session needed."""
+        with patch("litellm.completion", return_value=_mock_litellm()):
+            r = client.post("/converse", json={"message": "hi", "history": []})
+        assert "session_id" not in r.json()
+
+    def test_timeout_returns_error_message(self):
+        import asyncio
+        with patch("litellm.completion", side_effect=asyncio.TimeoutError()):
+            r = client.post("/converse", json={"message": "hi", "history": []})
+        assert r.status_code == 200
+        assert "逾時" in r.json()["reply"]
+
+    def test_llm_error_returns_error_message(self):
+        with patch("litellm.completion", side_effect=Exception("quota exceeded")):
+            r = client.post("/converse", json={"message": "hi", "history": []})
+        assert r.status_code == 200
+        assert "錯誤" in r.json()["reply"]
 
 
 # ── /converse does NOT enter task routing ────────────────────────────────────
 
 class TestConverseNeverRoutes:
-    def test_converse_returns_converse_mode(self):
+    def test_converse_mode_returned(self):
         with patch("litellm.completion", return_value=_mock_litellm()):
             r = client.post("/converse", json={"message": "你是誰？", "history": []})
-        assert r.status_code == 200
         assert r.json()["mode"] == "converse"
-        assert "session_id" in r.json()
 
-    def test_converse_does_not_call_classify_intent(self):
+    def test_classify_intent_not_called(self):
         with patch("litellm.completion", return_value=_mock_litellm()):
             with patch("api.main._classify_intent") as mock_cls:
                 client.post("/converse", json={"message": "測試", "history": []})
         mock_cls.assert_not_called()
 
-    def test_converse_does_not_call_needs_clarification(self):
-        with patch("litellm.completion", return_value=_mock_litellm()):
-            with patch("orchestrator.clarify.needs_clarification") as mock_nc:
-                client.post("/converse", json={"message": "測試", "history": []})
-        mock_nc.assert_not_called()
-
-    def test_converse_short_input_does_not_clarify(self):
-        """「測試」 two chars — used to trigger clarify gate in /chat, must NOT here."""
+    def test_short_input_not_clarified(self):
         with patch("litellm.completion", return_value=_mock_litellm()):
             r = client.post("/converse", json={"message": "測試", "history": []})
         assert r.json()["mode"] == "converse"
+        assert "reply" in r.json()
 
 
 # ── /converse sends history to LLM ───────────────────────────────────────────
@@ -67,7 +91,6 @@ class TestConverseHistory:
             client.post("/converse", json={"message": "繼續", "history": history})
 
         msgs = captured["messages"]
-        # history + current message
         assert len(msgs) == 3
         assert msgs[0]["role"] == "user"
         assert msgs[0]["content"] == "你好"
@@ -85,8 +108,7 @@ class TestConverseHistory:
         with patch("litellm.completion", side_effect=capture_call):
             client.post("/converse", json={"message": "new", "history": history})
 
-        # last 10 history + 1 current = 11
-        assert len(captured["messages"]) == 11
+        assert len(captured["messages"]) == 11  # last 10 + current
 
     def test_empty_history_ok(self):
         with patch("litellm.completion", return_value=_mock_litellm()):

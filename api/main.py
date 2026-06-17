@@ -246,50 +246,37 @@ def _make_direct_spec(task: str) -> TaskSpec:
 
 @app.post("/converse")
 async def converse_endpoint(req: ConverseRequest):
-    """Chat path: direct LLM reply with recent conversation context. No task routing."""
+    """Chat path: blocking LLM call, returns full reply in HTTP body. No WS needed."""
     import litellm
     from orchestrator.model_registry import resolve as _resolve
 
-    # Build messages: history (last 10) + current message
+    CONVERSE_TIMEOUT = 30  # seconds
+
     lm_messages = []
     for m in req.history[-10:]:
         role = "user" if m.get("role") == "user" else "assistant"
         lm_messages.append({"role": role, "content": m.get("text", "")})
     lm_messages.append({"role": "user", "content": req.message})
 
-    session_id = str(uuid.uuid4())[:8]
-    sessions[session_id] = {"raw_task": req.message, "status": "running", "mode": "converse"}
-
-    async def _stream():
-        loop = asyncio.get_event_loop()
-        try:
-            params = _resolve("agnes")
-            resp = await asyncio.to_thread(
+    try:
+        params = _resolve("agnes")
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(
                 litellm.completion,
                 messages=lm_messages,
                 max_tokens=1024,
                 temperature=0.7,
-                stream=True,
                 **params,
-            )
-            full = ""
-            for chunk in resp:
-                token = (chunk.choices[0].delta.content or "") if chunk.choices else ""
-                if token:
-                    full += token
-                    await push(session_id, "token", {"text": token})
-            sessions[session_id]["output"] = full
-            sessions[session_id]["status"] = "done"
-            await push(session_id, "result", {
-                "status": "done", "output": full,
-                "rounds": 1, "final_score": None, "history": [],
-            })
-        except Exception as e:
-            sessions[session_id]["status"] = "error"
-            await push(session_id, "error", {"msg": str(e)})
+            ),
+            timeout=CONVERSE_TIMEOUT,
+        )
+        reply = resp.choices[0].message.content.strip()
+    except asyncio.TimeoutError:
+        reply = f"⏱ 回應逾時（>{CONVERSE_TIMEOUT}s），請再試一次。"
+    except Exception as e:
+        reply = f"⚠️ 發生錯誤：{e}"
 
-    asyncio.create_task(_stream())
-    return {"session_id": session_id, "mode": "converse"}
+    return {"reply": reply, "mode": "converse"}
 
 
 @app.post("/chat")

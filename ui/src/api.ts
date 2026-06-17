@@ -18,7 +18,7 @@ export async function chatTask(task: string): Promise<{
 export async function converseMessage(
   message: string,
   history: { role: string; text: string }[]
-): Promise<{ session_id: string; mode: "converse" }> {
+): Promise<{ reply: string; mode: "converse" }> {
   const r = await fetch(`${BASE}/converse`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

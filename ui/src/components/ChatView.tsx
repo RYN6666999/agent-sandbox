@@ -103,11 +103,11 @@ export function ChatView() {
 
     const res = await converseMessage(rawText, history);
     useStore.getState().updateTask(tid, {
-      sessionId: res.session_id,
+      status: "idle",
       messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
-        { role: "system" as const, text: "" }],
+        { role: "system" as const, text: res.reply }],
     });
-    attachWs(tid, res.session_id);
+    setTimeout(() => textareaRef.current?.focus(), 50);
   }
 
   async function handleSubmit() {

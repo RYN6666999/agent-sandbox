@@ -234,8 +234,16 @@ def _make_direct_spec(task: str) -> TaskSpec:
 
 @app.post("/chat")
 async def chat_endpoint(req: TaskRequest):
-    """Smart routing: direct answer or alignment flow."""
+    """Smart routing: clarify → direct answer or alignment flow."""
+    from orchestrator.clarify import needs_clarification
     session_id = str(uuid.uuid4())[:8]
+
+    # Clarification gate — runs before intent classification, 0–1 LLM calls
+    should_clarify, question = needs_clarification(req.task)
+    if should_clarify:
+        sessions[session_id] = {"raw_task": req.task, "status": "clarifying"}
+        return {"session_id": session_id, "mode": "clarify", "question": question}
+
     request_id = session_id  # v1: same value, keep separate field for future split
     decision_log.record_request_trace(
         request_id=request_id,

@@ -3,11 +3,33 @@ import ReactMarkdown from "react-markdown";
 import { chatTask, approveTask, deliverTask, openWs } from "../api";
 import { useStore } from "../store";
 
+/** Merge vague original task + user's clarification into a natural sentence. */
+function mergeTask(original: string, answer: string): string {
+  const orig = original.trim();
+  const ans = answer.trim();
+  if (!ans) return orig;
+  const origPrefix = orig.slice(0, 3).toLowerCase();
+  if (ans.length >= orig.length && origPrefix && ans.toLowerCase().includes(origPrefix)) {
+    return ans;
+  }
+  return `${orig} ${ans}`;
+}
+
 export function ChatView() {
   const [input, setInput] = useState("");
+  const [clarifyCtx, setClarifyCtx] = useState<{ originalTask: string } | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const { activeTask, newTask, activeTaskId } = useStore();
+
+  // Auto-resize textarea on content change
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+  }, [input]);
 
   const task = activeTask();
 
@@ -63,8 +85,14 @@ export function ChatView() {
 
   async function handleSubmit() {
     if (!input.trim()) return;
-    const taskText = input.trim();
+    const rawText = input.trim();
     setInput("");
+
+    // If in clarify mode: merge original + answer, clear context, re-route
+    const taskText = clarifyCtx
+      ? mergeTask(clarifyCtx.originalTask, rawText)
+      : rawText;
+    if (clarifyCtx) setClarifyCtx(null);
 
     let tid = activeTaskId;
     if (!tid || useStore.getState().activeTask()?.status !== "idle") {
@@ -74,22 +102,33 @@ export function ChatView() {
     const t = useStore.getState().tasks.find((x) => x.id === tid)!;
     useStore.getState().updateTask(tid, {
       title: taskText.slice(0, 28) + (taskText.length > 28 ? "…" : ""),
-      messages: [...t.messages, { role: "user", text: taskText }],
-      status: "running", // optimistically show as running during classification
+      messages: [...t.messages, { role: "user", text: rawText }],
+      status: "running",
     });
 
     const res = await chatTask(taskText);
 
-    if (res.mode === "direct") {
-      // Backend already started running — just connect WS and stream
+    if (res.mode === "clarify") {
+      // Show clarifying question, reset to idle so user can type answer
+      useStore.getState().updateTask(tid, {
+        status: "idle",
+        messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
+          { role: "system", text: res.question ?? "能說得更具體嗎？" }],
+      });
+      setClarifyCtx({ originalTask: taskText });
+      // Restore focus to textarea
+      setTimeout(() => textareaRef.current?.focus(), 50);
+
+    } else if (res.mode === "direct") {
       useStore.getState().updateTask(tid, {
         sessionId: res.session_id,
         messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
-          { role: "system", text: "" }], // placeholder for streaming
+          { role: "system", text: "" }],
       });
       attachWs(tid, res.session_id);
+
     } else {
-      // Complex task — show alignment form
+      // align — show questions
       useStore.getState().updateTask(tid, {
         sessionId: res.session_id,
         questions: res.questions ?? [],
@@ -269,30 +308,49 @@ export function ChatView() {
       {/* input */}
       <div style={{
         padding: "10px 14px", borderTop: "0.5px solid #d4c9bb",
-        background: "#e8e1d8", display: "flex", gap: 8, alignItems: "center",
+        background: "#e8e1d8", display: "flex", gap: 8, alignItems: "flex-end",
       }}>
-        <input
+        <textarea
+          ref={textareaRef}
           className="input-field"
           value={input}
+          rows={1}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSubmit()}
-          placeholder={status !== "idle" ? "任務執行中…" : "輸入任務…"}
+          onKeyDown={(e) => {
+            // Cmd+Enter or Ctrl+Enter → send
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              handleSubmit();
+              return;
+            }
+            // Plain Enter → newline (default textarea behaviour, do nothing)
+          }}
+          placeholder={status !== "idle" ? "任務執行中…" : "輸入任務… (⌘↵ 發送)"}
           disabled={status !== "idle"}
           style={{
             flex: 1, background: "#ede8e0", border: "0.5px solid #d4c9bb",
             borderRadius: 8, padding: "9px 12px", fontSize: 13, color: "#3d352a",
-            fontFamily: "inherit",
+            fontFamily: "inherit", resize: "none", lineHeight: 1.6,
+            overflowY: "auto", minHeight: 38, maxHeight: 200,
             opacity: status !== "idle" ? 0.5 : 1,
+            boxSizing: "border-box",
           }}
         />
-        <button onClick={handleSubmit} disabled={status !== "idle"} style={{
-          width: 34, height: 34, borderRadius: 7,
-          background: status !== "idle" ? "#d4c9bb" : "#3d352a",
-          border: "none", cursor: status !== "idle" ? "not-allowed" : "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 14, color: status !== "idle" ? "#b5a99a" : "#f2ede6",
-          transition: "background .15s",
-        }}>↑</button>
+        <button
+          onClick={handleSubmit}
+          disabled={status !== "idle" || !input.trim()}
+          title="發送 (⌘↵)"
+          style={{
+            width: 34, height: 34, borderRadius: 7, flexShrink: 0,
+            background: (status !== "idle" || !input.trim()) ? "#d4c9bb" : "#3d352a",
+            border: "none",
+            cursor: (status !== "idle" || !input.trim()) ? "not-allowed" : "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 14,
+            color: (status !== "idle" || !input.trim()) ? "#b5a99a" : "#f2ede6",
+            transition: "background .15s",
+          }}
+        >↑</button>
       </div>
     </div>
   );

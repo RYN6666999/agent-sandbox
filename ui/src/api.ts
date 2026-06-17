@@ -2,8 +2,9 @@ const BASE = "http://localhost:8000";
 
 export async function chatTask(task: string): Promise<{
   session_id: string;
-  mode: "direct" | "align";
+  mode: "direct" | "align" | "clarify";
   questions?: { key: string; q: string }[];
+  question?: string;
 }> {
   const r = await fetch(`${BASE}/chat`, {
     method: "POST",

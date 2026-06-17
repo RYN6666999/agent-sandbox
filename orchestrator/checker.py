@@ -1,21 +1,28 @@
 """
 Checker: validates Maker output against TaskSpec stop conditions.
-Must use objective criteria — never subjective LLM feelings alone.
 
 Check pipeline (in order):
-  1. keyword_check  — expected_output keywords present in output?
-  2. taste_check    — any taste violations detected?
-  3. boundary_check — any red lines crossed?
-  4. llm_check      — only if above pass: LLM rates 0-10 against stop_on_metric
+  1. Detect if output is Python code with embedded tests
+     → If yes: run actual pytest in subprocess (real pass/fail)
+     → If code without tests: LLM fallback (marked as LLM_SCORED)
+     → If pure text: LLM fallback (marked as LLM_SCORED)
+  2. keyword / boundary hard checks apply only on the LLM path
 
-Pass threshold: keyword + taste + boundary all clear, llm_score >= 7.
-No-progress threshold: score delta < 0.5 over previous round.
+Pass threshold (pytest path): exit_code == 0 and failed_count == 0
+Pass threshold (LLM path):    llm_score >= 7.0
+score mapping: 10.0 (pytest pass) | 2.0 (pytest fail) | 0.0 (timeout/error)
+               so score never misleads loop.py's no_progress calculation.
 """
+import re
+import subprocess
 import sys
+import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dataclasses import dataclass, field
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -23,57 +30,213 @@ import litellm
 from contracts.task_spec import TaskSpec
 from orchestrator.model_registry import resolve as _resolve
 
-CHECKER_MODEL = "gemini-flash"   # stronger than Maker's default Agnes
-CHECKER_FALLBACKS = ["agnes"]    # used when primary quota exhausted
+CHECKER_MODEL = "gemini-flash"
+CHECKER_FALLBACKS = ["agnes"]
+
+PYTEST_TIMEOUT = 60          # seconds before pytest subprocess is killed
+STDOUT_MAX = 4000            # chars kept from pytest output
+
+
+# ── data structures ──────────────────────────────────────────────────────────
+
+@dataclass
+class PytestResult:
+    passed: bool
+    exit_code: int
+    passed_count: int
+    failed_count: int
+    stdout: str              # truncated to STDOUT_MAX
+    timed_out: bool
+    error: Optional[str] = None
 
 
 @dataclass
 class CheckResult:
     passed: bool
-    score: float                 # 0.0–10.0
+    score: float             # 0.0–10.0, kept for loop.py no_progress calc
     feedback: str
     violations: list[str] = field(default_factory=list)
+    pytest_result: Optional[PytestResult] = None
 
+
+# ── code detection helpers ────────────────────────────────────────────────────
+
+_CODE_PATTERN = re.compile(
+    r'^\s*(def |class |import |from \S+ import )',
+    re.MULTILINE,
+)
+_TEST_PATTERN = re.compile(r'^\s*def test_\w+', re.MULTILINE)
+_FENCE_PATTERN = re.compile(r'```(?:python)?\n(.*?)```', re.DOTALL)
+
+
+def _extract_code(output: str) -> str:
+    """Pull code from ```python``` fences; fall back to raw text."""
+    blocks = _FENCE_PATTERN.findall(output)
+    return '\n\n'.join(blocks) if blocks else output
+
+
+def _is_code_output(output: str) -> bool:
+    """True only when output clearly contains Python code (line-start patterns)."""
+    return bool(_CODE_PATTERN.search(_extract_code(output)))
+
+
+def _has_pytest_tests(code: str) -> bool:
+    """True when code contains at least one pytest-style test function."""
+    return bool(_TEST_PATTERN.search(code))
+
+
+# ── pytest runner ─────────────────────────────────────────────────────────────
+
+def _parse_counts(stdout: str) -> tuple[int, int]:
+    """Return (passed_count, failed_count) from pytest -q output."""
+    passed = 0
+    failed = 0
+    m = re.search(r'(\d+) passed', stdout)
+    if m:
+        passed = int(m.group(1))
+    m = re.search(r'(\d+) failed', stdout)
+    if m:
+        failed = int(m.group(1))
+    # collection/syntax errors: exit non-zero but 0 passed, 0 failed
+    # treat as 1 failure so passed stays False
+    if failed == 0 and passed == 0:
+        if re.search(r'(ERROR collecting|SyntaxError|ImportError|error)', stdout, re.IGNORECASE):
+            failed = 1
+    return passed, failed
+
+
+def run_pytest(code: str, test_code: str, timeout: int = PYTEST_TIMEOUT) -> PytestResult:
+    """
+    Write code + test_code to a temp dir and run `pytest -q`.
+
+    - code: implementation (empty string if tests are self-contained)
+    - test_code: the test file content (must have def test_* functions)
+    - Returns PytestResult; never raises.
+    """
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            if code.strip():
+                (tmp / "solution.py").write_text(code, encoding="utf-8")
+            (tmp / "test_solution.py").write_text(test_code, encoding="utf-8")
+
+            try:
+                proc = subprocess.run(
+                    [sys.executable, "-m", "pytest", "-q", "test_solution.py"],
+                    capture_output=True,
+                    text=True,
+                    cwd=tmpdir,
+                    timeout=timeout,
+                )
+            except subprocess.TimeoutExpired:
+                return PytestResult(
+                    passed=False, exit_code=-1,
+                    passed_count=0, failed_count=0,
+                    stdout="[pytest timed out]",
+                    timed_out=True,
+                )
+
+            raw_out = (proc.stdout + proc.stderr)[:STDOUT_MAX]
+            passed_count, failed_count = _parse_counts(proc.stdout + proc.stderr)
+            ok = proc.returncode == 0 and failed_count == 0
+
+            return PytestResult(
+                passed=ok,
+                exit_code=proc.returncode,
+                passed_count=passed_count,
+                failed_count=failed_count,
+                stdout=raw_out,
+                timed_out=False,
+            )
+
+    except Exception as exc:
+        return PytestResult(
+            passed=False, exit_code=-1,
+            passed_count=0, failed_count=0,
+            stdout=str(exc)[:STDOUT_MAX],
+            timed_out=False,
+            error=str(exc),
+        )
+
+
+# ── main checker ──────────────────────────────────────────────────────────────
 
 def check(spec: TaskSpec, output: str, prev_score: float | None = None) -> CheckResult:
+    extracted = _extract_code(output)
+    is_code = _is_code_output(output)
+    has_tests = _has_pytest_tests(extracted)
+
+    if is_code and has_tests:
+        return _pytest_check(extracted)
+
+    # ── LLM path (text output, or code without tests) ────────────────────────
+    reason = "no tests found in output" if is_code else "text output"
+    return _llm_check(spec, output, prev_score, llm_reason=reason)
+
+
+def _pytest_check(code_with_tests: str) -> CheckResult:
+    """Run pytest; map results to CheckResult. score is always 10 or < 7."""
+    pr = run_pytest("", code_with_tests)   # all code+tests in one file
+
+    if pr.timed_out:
+        return CheckResult(
+            passed=False, score=0.0,
+            feedback="[PYTEST] timed out",
+            pytest_result=pr,
+        )
+
+    if pr.passed:
+        return CheckResult(
+            passed=True, score=10.0,
+            feedback=f"[PYTEST] {pr.passed_count} passed, 0 failed",
+            pytest_result=pr,
+        )
+
+    # Any failure: score=2.0 (always below 7.0 threshold)
+    summary = pr.stdout[:500].strip()
+    return CheckResult(
+        passed=False, score=2.0,
+        feedback=f"[PYTEST] {pr.failed_count} failed, {pr.passed_count} passed\n{summary}",
+        pytest_result=pr,
+    )
+
+
+def _llm_check(
+    spec: TaskSpec, output: str,
+    prev_score: float | None,
+    llm_reason: str,
+) -> CheckResult:
+    """Original LLM scoring path — always marked [LLM_SCORED]."""
     violations: list[str] = []
 
-    # 1. Keyword check — expected_output must appear conceptually in output
+    # keyword check
     expected = str(spec.io_example.get("expected_output", ""))
     keywords = [w.strip() for w in expected.replace("=", " ").split() if len(w) > 2]
     missing = [kw for kw in keywords if kw.lower() not in output.lower()]
     if missing:
         violations.append(f"missing expected keywords: {missing}")
 
-    # 2. Boundary check — red lines must not appear in output
+    # boundary check
     for boundary in spec.boundaries:
-        # Simple heuristic: if boundary says "no X" and X appears, flag it
         if boundary.lower().startswith("no "):
             forbidden = boundary[3:].strip().lower()
             if forbidden and forbidden in output.lower():
                 violations.append(f"boundary crossed: {boundary!r}")
 
-    # 3. If hard violations → fail immediately without LLM call
     if violations:
         return CheckResult(
-            passed=False,
-            score=0.0,
-            feedback=f"Hard check failed: {'; '.join(violations)}",
+            passed=False, score=0.0,
+            feedback=f"[LLM_SCORED | {llm_reason}] Hard check failed: {'; '.join(violations)}",
             violations=violations,
         )
 
-    # 4. LLM score against stop_on_metric
     score, llm_feedback = _llm_score(spec, output)
-
-    # No-progress guard: if score improved < 0.5 over previous round, flag it
     no_progress = prev_score is not None and (score - prev_score) < 0.5
-
     passed = score >= 7.0 and not no_progress
 
     return CheckResult(
-        passed=passed,
-        score=score,
-        feedback=llm_feedback + (" [no progress]" if no_progress else ""),
+        passed=passed, score=score,
+        feedback=f"[LLM_SCORED | {llm_reason}] {llm_feedback}" + (" [no progress]" if no_progress else ""),
         violations=[],
     )
 
@@ -106,10 +269,9 @@ def _llm_score(spec: TaskSpec, output: str) -> tuple[float, str]:
             data = json.loads(raw)
             return float(data["score"]), data.get("feedback", "")
         except (litellm.RateLimitError, litellm.BadRequestError) as e:
-            # Gemini sometimes returns BadRequestError for 429/RESOURCE_EXHAUSTED
             msg = str(e)
             if "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower():
-                continue  # rate-limited → try next model
+                continue
             return 5.0, f"checker LLM error: {e}"
         except Exception as e:
             return 5.0, f"checker LLM error: {e}"

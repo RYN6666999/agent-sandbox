@@ -108,7 +108,17 @@ export function ChatView() {
 
     const res = await chatTask(taskText);
 
-    if (res.mode === "clarify") {
+    if (res.mode === "confirm_dangerous") {
+      const triggerList = (res.triggers ?? []).join("、");
+      useStore.getState().updateTask(tid, {
+        status: "idle",
+        messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
+          { role: "system", text: `⚠️ 偵測到危險指令：**${triggerList}**\n\n這些操作不可逆。如果你確認要繼續，請回覆「確認繼續」。` }],
+      });
+      setClarifyCtx({ originalTask: taskText });
+      setTimeout(() => textareaRef.current?.focus(), 50);
+
+    } else if (res.mode === "clarify") {
       // Show clarifying question, reset to idle so user can type answer
       useStore.getState().updateTask(tid, {
         status: "idle",

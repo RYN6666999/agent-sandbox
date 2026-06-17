@@ -6,6 +6,36 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from contracts.task_spec import TaskSpec
 
 
+def synthesize_task_brief(answers: dict) -> str:
+    """
+    Combine align Q&A into one clear, executable task description.
+    Pure rules, 0 LLM calls. Missing fields are omitted (no empty placeholders).
+    """
+    parts: list[str] = []
+
+    why = (answers.get("why") or "").strip()
+    if why:
+        parts.append(why)
+
+    io_raw = (answers.get("io") or "").strip()
+    if io_raw:
+        parts.append(f"具體要做：{io_raw}")
+
+    stop = (answers.get("stop_metric") or "").strip()
+    if stop:
+        parts.append(f"完成判準：{stop}")
+
+    boundary = (answers.get("boundary") or "").strip()
+    if boundary:
+        parts.append(f"限制：{boundary}")
+
+    taste = (answers.get("taste") or "").strip()
+    if taste:
+        parts.append(f"品味要求：{taste}")
+
+    return " — ".join(parts) if parts else "未填寫任務描述"
+
+
 def parse_answers_to_spec(answers: dict) -> TaskSpec:
     """Convert raw align answers dict → validated TaskSpec."""
     io_raw = answers.get("io", "")

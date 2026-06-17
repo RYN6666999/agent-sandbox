@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 
 from contracts.task_spec import TaskSpec
-from align.core import parse_answers_to_spec, ALIGN_QUESTIONS
+from align.core import parse_answers_to_spec, synthesize_task_brief, ALIGN_QUESTIONS
 from orchestrator.loop import run as run_loop
 from orchestrator.maker import make as run_maker
 from orchestrator import decision_log
@@ -244,6 +244,13 @@ async def chat_endpoint(req: TaskRequest):
         sessions[session_id] = {"raw_task": req.task, "status": "clarifying"}
         return {"session_id": session_id, "mode": "clarify", "question": question}
 
+    # Safety gate — pure rules, 0 LLM calls
+    from orchestrator.safety import is_dangerous
+    dangerous, triggers = is_dangerous(req.task)
+    if dangerous:
+        sessions[session_id] = {"raw_task": req.task, "status": "confirm_dangerous"}
+        return {"session_id": session_id, "mode": "confirm_dangerous", "triggers": triggers}
+
     request_id = session_id  # v1: same value, keep separate field for future split
     decision_log.record_request_trace(
         request_id=request_id,
@@ -350,7 +357,20 @@ async def approve_task(req: ApproveRequest):
     a = dict(req.spec)
     if not a.get("why"):
         a["why"] = session["raw_task"]
+
+    # Safety gate — same function as /chat, covers answers filled during align
+    from orchestrator.safety import is_dangerous
+    combined_text = " ".join(str(v) for v in a.values())
+    dangerous, triggers = is_dangerous(combined_text)
+    if dangerous:
+        return {"ok": False, "mode": "confirm_dangerous", "triggers": triggers,
+                "session_id": req.session_id}
+
     spec = parse_answers_to_spec(a)
+
+    # Synthesize a clear executable task brief and use it as the primary task description
+    brief = synthesize_task_brief(a)
+    spec = spec.model_copy(update={"why": brief})
 
     request_id = session.get("request_id", req.session_id)
     sessions[req.session_id]["spec"] = spec.model_dump()

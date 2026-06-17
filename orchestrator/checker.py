@@ -13,6 +13,7 @@ Pass threshold (LLM path):    llm_score >= 7.0
 score mapping: 10.0 (pytest pass) | 2.0 (pytest fail) | 0.0 (timeout/error)
                so score never misleads loop.py's no_progress calculation.
 """
+import json
 import re
 import subprocess
 import sys
@@ -30,8 +31,20 @@ import litellm
 from contracts.task_spec import TaskSpec
 from orchestrator.model_registry import resolve as _resolve
 
-CHECKER_MODEL = "gemini-flash"
-CHECKER_FALLBACKS = ["agnes"]
+_DEFAULT_CHECKER_MODEL = "gemini-flash"
+_DEFAULT_CHECKER_FALLBACKS = ["agnes"]
+_CHECKER_SETTINGS_PATH = Path(__file__).parent.parent / "data" / "settings.json"
+
+
+def _checker_model_and_fallbacks() -> tuple[str, list[str]]:
+    try:
+        s = json.loads(_CHECKER_SETTINGS_PATH.read_text())
+        return (
+            s.get("checker_model", _DEFAULT_CHECKER_MODEL),
+            s.get("checker_fallbacks", _DEFAULT_CHECKER_FALLBACKS),
+        )
+    except Exception:
+        return _DEFAULT_CHECKER_MODEL, _DEFAULT_CHECKER_FALLBACKS
 
 PYTEST_TIMEOUT = 60          # seconds before pytest subprocess is killed
 STDOUT_MAX = 4000            # chars kept from pytest output
@@ -252,7 +265,8 @@ def _llm_score(spec: TaskSpec, output: str) -> tuple[float, str]:
         '{"score": <0-10>, "feedback": "<one sentence on what to improve>"}'
     )
     import json
-    for alias in [CHECKER_MODEL] + CHECKER_FALLBACKS:
+    checker_model, checker_fallbacks = _checker_model_and_fallbacks()
+    for alias in [checker_model] + checker_fallbacks:
         try:
             params = _resolve(alias)
             resp = litellm.completion(

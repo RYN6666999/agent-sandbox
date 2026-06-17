@@ -34,6 +34,7 @@ ws_clients: dict[str, WebSocket] = {}
 
 class TaskRequest(BaseModel):
     task: str
+    forced_mode: str | None = None   # "direct" | "align" — skips routing, set after clarify_routing
 
     @field_validator("task")
     @classmethod
@@ -67,9 +68,11 @@ class DeliverRequest(BaseModel):
 
 
 class SettingsPayload(BaseModel):
-    maker_model: str = "agnes"
-    checker_model: str = "gemini-flash"
+    plan_model: str = "openrouter-classifier"    # D16: classifier / routing intent
+    maker_model: str = "agnes"                   # D17 pending: should be strong coding model
+    checker_model: str = "gemini-flash"          # LLM path only; pytest path uses no model
     checker_fallbacks: list[str] = ["agnes"]
+    routing_confidence_threshold: float = 0.8   # kept for reference; D11 now uses 3-way intent
     max_rounds: int = 5
     temperature: float = 0.7
     max_tokens: int = 2048
@@ -104,9 +107,15 @@ async def push(session_id: str, event: str, data: Any):
 
 
 def _classify_intent(task: str) -> dict:
-    """Return intent-gate decision trace for API-level direct vs align routing."""
-    from router.classifier import llm_classify_detailed
-    from router.rules import TaskType
+    """Return intent-gate decision trace for API-level direct vs align routing.
+
+    Two-stage:
+    1. Heuristic: pure-question → direct (trusted, no model needed).
+    2. LLM 3-way routing intent: answer/code/unclear.
+       unclear → decision="clarify_routing" (D11).
+       Fallback error also returns unclear (safer to ask than guess).
+    """
+    from router.classifier import routing_intent
 
     t = task.strip()
     lo = t.lower()
@@ -125,12 +134,14 @@ def _classify_intent(task: str) -> dict:
         t.endswith("?") or t.endswith("？") or matched_question is not None or lo.endswith("是什麼")
     )
     looks_like_task = matched_task_verb is not None
+
     common_details = {
         "looks_like_question": looks_like_question,
         "looks_like_task": looks_like_task,
         "task_length": len(t),
     }
 
+    # Heuristic fast-path: pure question, no build signal → direct (D11: trusted)
     if looks_like_question and not looks_like_task:
         return {
             "decision": "direct",
@@ -142,60 +153,26 @@ def _classify_intent(task: str) -> dict:
             "details": {**common_details, "heuristic_reason": "question_without_build_signal"},
         }
 
-    llm_result = llm_classify_detailed(task)
-    llm_details = {
+    # LLM 3-way routing intent (D11: unclear → clarify_routing)
+    ri = routing_intent(task)
+    ri_details = {
         **common_details,
-        "llm_task_type": llm_result.task_type.value,
-        "llm_confidence": llm_result.confidence,
-        "llm_source": llm_result.source,
-        "retry_count": llm_result.retry_count,
+        "routing_category": ri.category,
+        "routing_reason": ri.reason,
+        "routing_source": ri.source,
     }
 
-    if llm_result.source == "llm":
-        if llm_result.task_type in (TaskType.HIGH_FREQ, TaskType.SUMMARY) and llm_result.confidence >= 0.5:
-            return {
-                "decision": "direct",
-                "decision_source": "llm",
-                "matched_keyword": None,
-                "confidence": llm_result.confidence,
-                "classifier_model": llm_result.classifier_model,
-                "fallback_reason": None,
-                "details": llm_details,
-            }
-        if llm_result.task_type == TaskType.ARCHITECTURE and llm_result.confidence >= 0.6:
-            return {
-                "decision": "align",
-                "decision_source": "llm",
-                "matched_keyword": None,
-                "confidence": llm_result.confidence,
-                "classifier_model": llm_result.classifier_model,
-                "fallback_reason": None,
-                "details": llm_details,
-            }
-        if llm_result.task_type == TaskType.FEATURE and llm_result.confidence >= 0.7 and len(t) < 80:
-            return {
-                "decision": "direct",
-                "decision_source": "llm",
-                "matched_keyword": None,
-                "confidence": llm_result.confidence,
-                "classifier_model": llm_result.classifier_model,
-                "fallback_reason": None,
-                "details": llm_details,
-            }
+    decision_map = {"answer": "direct", "code": "align", "unclear": "clarify_routing"}
+    decision = decision_map.get(ri.category, "clarify_routing")
 
-    decision = "direct" if len(t) < 60 and not looks_like_task else "align"
-    decision_source = "fallback" if llm_result.source == "fallback" else "heuristic"
     return {
         "decision": decision,
-        "decision_source": decision_source,
-        "matched_keyword": matched_task_verb if decision_source == "heuristic" and matched_task_verb else None,
-        "confidence": llm_result.confidence if llm_result.source in {"llm", "fallback"} else 0.6,
-        "classifier_model": llm_result.classifier_model,
-        "fallback_reason": llm_result.fallback_reason,
-        "details": {
-            **llm_details,
-            "heuristic_reason": "short_non_build_default" if decision == "direct" else "default_align",
-        },
+        "decision_source": ri.source,
+        "matched_keyword": matched_task_verb,
+        "confidence": 0.9 if ri.category in ("answer", "code") and ri.source == "llm" else 0.5,
+        "classifier_model": ri.classifier_model,
+        "fallback_reason": ri.reason if ri.source == "fallback" else None,
+        "details": ri_details,
     }
 
 
@@ -279,27 +256,63 @@ async def converse_endpoint(req: ConverseRequest):
     return {"reply": reply, "mode": "converse"}
 
 
+_ROUTING_CLARIFY_QUESTION = (
+    "我不確定這個任務是要我 (A) 直接回答就好，"
+    "還是 (B) 做出可驗收的成果（寫程式／附測試）？"
+    "請選 A 或 B。"
+)
+
+
 @app.post("/chat")
 async def chat_endpoint(req: TaskRequest):
-    """Smart routing: clarify → direct answer or alignment flow."""
-    from orchestrator.clarify import needs_clarification
+    """Smart routing: safety → clarify → confidence-gated intent → direct/align."""
     session_id = str(uuid.uuid4())[:8]
 
-    # Safety gate first — dangerous ops blocked before any LLM call
+    # Safety gate ALWAYS runs first — even for forced_mode requests (D3 red line)
     from orchestrator.safety import is_dangerous
     dangerous, triggers = is_dangerous(req.task)
     if dangerous:
         sessions[session_id] = {"raw_task": req.task, "status": "confirm_dangerous"}
         return {"session_id": session_id, "mode": "confirm_dangerous", "triggers": triggers}
 
-    # Clarification gate — 0–1 LLM calls
+    # forced_mode: user answered clarify_routing question — skip re-routing
+    if req.forced_mode in ("direct", "align"):
+        request_id = session_id
+        decision_log.record_request_trace(
+            request_id=request_id,
+            session_id=session_id,
+            entrypoint="chat_forced",
+            raw_task=req.task,
+            latest_status="pending_intent_gate",
+            notes={"forced_mode": req.forced_mode},
+        )
+        decision_log.record_intent_gate(
+            request_id=request_id,
+            session_id=session_id,
+            decision=req.forced_mode,
+            decision_source="user_clarify_routing",
+            confidence=1.0,
+            details={"forced_mode": req.forced_mode},
+        )
+        if req.forced_mode == "direct":
+            spec = _make_direct_spec(req.task)
+            sessions[session_id] = {"request_id": request_id, "raw_task": req.task,
+                                     "status": "running", "spec": spec.model_dump()}
+            decision_log.update_request_status(request_id, "running")
+            asyncio.create_task(_run_direct_and_push(session_id, spec))
+            return {"session_id": session_id, "mode": "direct"}
+        sessions[session_id] = {"request_id": request_id, "raw_task": req.task, "status": "aligning"}
+        decision_log.update_request_status(request_id, "aligning")
+        return {"session_id": session_id, "mode": "align", "questions": ALIGN_QUESTIONS}
+
+    # Clarification gate — 0–1 LLM calls (content ambiguity, not routing ambiguity)
     from orchestrator.clarify import needs_clarification
     should_clarify, question = needs_clarification(req.task)
     if should_clarify:
         sessions[session_id] = {"raw_task": req.task, "status": "clarifying"}
         return {"session_id": session_id, "mode": "clarify", "question": question}
 
-    request_id = session_id  # v1: same value, keep separate field for future split
+    request_id = session_id
     decision_log.record_request_trace(
         request_id=request_id,
         session_id=session_id,
@@ -310,6 +323,28 @@ async def chat_endpoint(req: TaskRequest):
     )
 
     intent = _classify_intent(req.task)
+
+    # D11: clarify_routing comes directly from _classify_intent (unclear category)
+    if intent["decision"] == "clarify_routing":
+        decision_log.record_intent_gate(
+            request_id=request_id,
+            session_id=session_id,
+            decision="clarify_routing",
+            decision_source=intent["decision_source"],
+            matched_keyword=intent.get("matched_keyword"),
+            confidence=intent.get("confidence"),
+            classifier_model=intent.get("classifier_model"),
+            fallback_reason=intent.get("fallback_reason"),
+            details={**intent.get("details", {}), "trigger": "routing_intent_unclear"},
+        )
+        sessions[session_id] = {"raw_task": req.task, "status": "clarify_routing"}
+        return {
+            "session_id": session_id,
+            "mode": "clarify_routing",
+            "question": _ROUTING_CLARIFY_QUESTION,
+            "options": ["A", "B"],
+        }
+
     decision_log.record_intent_gate(
         request_id=request_id,
         session_id=session_id,

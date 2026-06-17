@@ -95,16 +95,20 @@ def make(spec: TaskSpec, feedback: str = "", round_n: int = 1,
     policy_result = route(spec.why, request_id=request_id, session_id=session_id, round_n=round_n)
     triple = policy_result.triple
 
+    # D17/D15 fix: settings["maker_model"] overrides mapping-table hardcode.
+    # triple still provides skills and mcp_tools; only model is overridden.
+    maker_model_alias = settings.get("maker_model") or triple.model
+
     # Build system prompt — inject user system_prompt if set
     base = BASE_PROMPT
     user_sys = settings.get("system_prompt", "").strip()
     if user_sys:
         base = f"{BASE_PROMPT}\n\n{user_sys}"
 
-    system = build_system_prompt(triple.skills, triple.model, base)
+    system = build_system_prompt(triple.skills, maker_model_alias, base)
     user_msg = _build_user_msg(spec, feedback, round_n)
 
-    params = _resolve(triple.model)
+    params = _resolve(maker_model_alias)
     max_tokens = settings.get("max_tokens", 2048)
     temperature = settings.get("temperature", None)
     if temperature is not None:

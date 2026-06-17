@@ -1,4 +1,9 @@
-"""Stage-2: cheap LLM classifier for the ~30% rule misses."""
+"""Stage-2: LLM classifier for the ~30% rule misses.
+
+Model is read from data/settings.json["classifier_model"] so it can be swapped
+without touching code. Defaults to "openrouter-classifier" (openai/gpt-oss-120b
+via OpenRouter) which has calibrated confidence scores for D11 routing gate.
+"""
 from __future__ import annotations
 
 import json
@@ -14,7 +19,18 @@ import litellm
 from router.rules import TaskType
 from orchestrator.model_registry import resolve as _resolve
 
-CLASSIFIER_MODEL = "agnes"  # free, fast, good enough for classification
+_SETTINGS_PATH = Path(__file__).parent.parent / "data" / "settings.json"
+_DEFAULT_CLASSIFIER = "openrouter-classifier"
+
+
+def _classifier_model() -> str:
+    try:
+        return json.loads(_SETTINGS_PATH.read_text()).get("plan_model", _DEFAULT_CLASSIFIER)
+    except Exception:
+        return _DEFAULT_CLASSIFIER
+
+
+# ── 7-category classification (model/skill routing) ────────────────────────
 
 PROMPT = """\
 Classify the following task into exactly one category.
@@ -33,6 +49,16 @@ Respond with JSON only: {"type": "<category>", "confidence": <0.0-1.0>}
 Task: {task}
 """
 
+# System prompt for routing intent (D11): 3-way classification
+# Requires response_format=json_object; works best with reasoning models.
+_ROUTING_SYSTEM = (
+    "You classify user task routing. Always respond with valid JSON containing exactly "
+    "two keys: \"category\" (one of: answer/code/unclear) and \"reason\" (one sentence). "
+    "\"answer\" = clearly only needs a direct reply or explanation. "
+    "\"code\" = clearly needs working code or runnable artifact. "
+    "\"unclear\" = could plausibly need either — the intent is genuinely ambiguous."
+)
+
 
 @dataclass
 class ClassifyResult:
@@ -44,22 +70,73 @@ class ClassifyResult:
     retry_count: int = 0
 
 
-def llm_classify_detailed(task: str) -> ClassifyResult:
-    """Returns full classifier trace. Falls back to FEATURE on any error."""
+@dataclass
+class RoutingIntent:
+    category: str               # 'answer' | 'code' | 'unclear'
+    reason: str
+    source: str                 # 'llm' | 'fallback'
+    classifier_model: str | None
+
+
+def routing_intent(task: str) -> RoutingIntent:
+    """3-way routing intent: answer / code / unclear.
+
+    Uses response_format=json_object so the model cannot return freeform text.
+    'unclear' → D11: trigger clarify_routing, ask user A/B question.
+    """
+    model_alias = _classifier_model()
     try:
-        params = _resolve(CLASSIFIER_MODEL)
+        params = _resolve(model_alias)
+        resp = litellm.completion(
+            messages=[
+                {"role": "system", "content": _ROUTING_SYSTEM},
+                {"role": "user", "content": task},
+            ],
+            max_tokens=2000,   # reasoning model needs space for CoT before output
+            temperature=0.0,
+            response_format={"type": "json_object"},
+            **params,
+        )
+        raw = resp.choices[0].message.content or ""
+        data = json.loads(raw)
+        cat = data.get("category", "unclear")
+        if cat not in ("answer", "code", "unclear"):
+            cat = "unclear"
+        return RoutingIntent(
+            category=cat,
+            reason=data.get("reason", ""),
+            source="llm",
+            classifier_model=model_alias,
+        )
+    except Exception as exc:
+        # On any failure treat as unclear → safer to ask than to guess
+        return RoutingIntent(
+            category="unclear",
+            reason=f"classifier error: {exc}",
+            source="fallback",
+            classifier_model=model_alias,
+        )
+
+
+def llm_classify_detailed(task: str) -> ClassifyResult:
+    """Returns full classifier trace (7-category). Falls back to FEATURE on any error."""
+    model_alias = _classifier_model()
+    try:
+        params = _resolve(model_alias)
         resp = litellm.completion(
             messages=[{"role": "user", "content": PROMPT.format(task=task)}],
-            max_tokens=50,
+            max_tokens=2000,
             temperature=0.0,
             **params,
         )
-        raw = resp.choices[0].message.content.strip()
-        # strip markdown fences if present
+        raw = (resp.choices[0].message.content or "").strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
+        import re
+        m = re.search(r'\{[^}]+\}', raw)
+        raw = m.group(0) if m else raw
         data = json.loads(raw)
         task_type = TaskType(data["type"])
         confidence = float(data.get("confidence", 0.6))
@@ -67,7 +144,7 @@ def llm_classify_detailed(task: str) -> ClassifyResult:
             task_type=task_type,
             confidence=confidence,
             source="llm",
-            classifier_model=CLASSIFIER_MODEL,
+            classifier_model=model_alias,
             retry_count=0,
         )
     except Exception as exc:
@@ -75,7 +152,7 @@ def llm_classify_detailed(task: str) -> ClassifyResult:
             task_type=TaskType.FEATURE,
             confidence=0.3,
             source="fallback",
-            classifier_model=CLASSIFIER_MODEL,
+            classifier_model=model_alias,
             fallback_reason=str(exc),
             retry_count=0,
         )

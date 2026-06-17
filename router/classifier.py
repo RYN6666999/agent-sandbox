@@ -1,7 +1,9 @@
 """Stage-2: cheap LLM classifier for the ~30% rule misses."""
+from __future__ import annotations
+
 import json
-import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -32,8 +34,18 @@ Task: {task}
 """
 
 
-def llm_classify(task: str) -> tuple[TaskType, float]:
-    """Returns (TaskType, confidence). Falls back to FEATURE on any error."""
+@dataclass
+class ClassifyResult:
+    task_type: TaskType
+    confidence: float
+    source: str                 # 'llm' | 'fallback'
+    classifier_model: str | None
+    fallback_reason: str | None = None
+    retry_count: int = 0
+
+
+def llm_classify_detailed(task: str) -> ClassifyResult:
+    """Returns full classifier trace. Falls back to FEATURE on any error."""
     try:
         params = _resolve(CLASSIFIER_MODEL)
         resp = litellm.completion(
@@ -51,6 +63,25 @@ def llm_classify(task: str) -> tuple[TaskType, float]:
         data = json.loads(raw)
         task_type = TaskType(data["type"])
         confidence = float(data.get("confidence", 0.6))
-        return task_type, confidence
-    except Exception:
-        return TaskType.FEATURE, 0.3   # safe default
+        return ClassifyResult(
+            task_type=task_type,
+            confidence=confidence,
+            source="llm",
+            classifier_model=CLASSIFIER_MODEL,
+            retry_count=0,
+        )
+    except Exception as exc:
+        return ClassifyResult(
+            task_type=TaskType.FEATURE,
+            confidence=0.3,
+            source="fallback",
+            classifier_model=CLASSIFIER_MODEL,
+            fallback_reason=str(exc),
+            retry_count=0,
+        )
+
+
+def llm_classify(task: str) -> tuple[TaskType, float]:
+    """Backwards-compatible wrapper returning only (TaskType, confidence)."""
+    result = llm_classify_detailed(task)
+    return result.task_type, result.confidence

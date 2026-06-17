@@ -30,6 +30,8 @@ _local = threading.local()
 
 class LoopState(TypedDict):
     spec: dict                  # TaskSpec.model_dump()
+    request_id: str | None
+    session_id: str | None
     round_n: int
     output: str
     feedback: str
@@ -47,8 +49,14 @@ def maker_node(state: LoopState) -> LoopState:
     on_token = getattr(_local, "on_token", None)
     if on_round_start:
         on_round_start(state["round_n"])
-    output = make(spec, feedback=state["feedback"], round_n=state["round_n"],
-                  on_token=on_token)
+    if state.get("request_id") and state.get("session_id"):
+        output = make(spec, feedback=state["feedback"], round_n=state["round_n"],
+                      on_token=on_token,
+                      request_id=state.get("request_id"),
+                      session_id=state.get("session_id"))
+    else:
+        output = make(spec, feedback=state["feedback"], round_n=state["round_n"],
+                      on_token=on_token)
     return {**state, "output": output}
 
 
@@ -115,7 +123,9 @@ def build_graph():
 
 def run(spec: TaskSpec,
         on_token: Callable[[str], None] | None = None,
-        on_round_start: Callable[[int], None] | None = None) -> dict:
+        on_round_start: Callable[[int], None] | None = None,
+        request_id: str | None = None,
+        session_id: str | None = None) -> dict:
     """Run Maker/Checker loop. Returns final state dict."""
     _local.on_token = on_token
     _local.on_round_start = on_round_start
@@ -123,6 +133,8 @@ def run(spec: TaskSpec,
     graph = build_graph()
     initial: LoopState = {
         "spec": spec.model_dump(),
+        "request_id": request_id,
+        "session_id": session_id,
         "round_n": 1,
         "output": "",
         "feedback": "",

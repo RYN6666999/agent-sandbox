@@ -86,11 +86,13 @@ def _mcp_tools_to_litellm(tools: list[dict]) -> list[dict]:
 
 
 def make(spec: TaskSpec, feedback: str = "", round_n: int = 1,
-         on_token: "Callable[[str], None] | None" = None) -> str:
+         on_token: "Callable[[str], None] | None" = None,
+         request_id: str | None = None,
+         session_id: str | None = None) -> str:
     """Call the routed model and return raw output string."""
     settings = _load_settings()
 
-    policy_result = route(spec.why)
+    policy_result = route(spec.why, request_id=request_id, session_id=session_id, round_n=round_n)
     triple = policy_result.triple
 
     # Build system prompt — inject user system_prompt if set

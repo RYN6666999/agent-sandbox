@@ -80,6 +80,40 @@
 
 ---
 
+## D13. 設定欄位命名：plan_model / maker_model / checker_model
+- **決策**：settings.json 三個模型欄位命名為 `plan_model`（分類/routing）、`maker_model`（執行）、`checker_model`（驗收）。舊名 `classifier_model` 廢棄。
+- **為什麼**：classifier_model 只說「它是分類器」，沒說它在哪個 agent 層。plan/maker/checker 對應架構三層，接手的人或 AI 一眼看出職責。
+- **邊界**：`plan_model` 默認指向 `openrouter-classifier`（見 D16）。三個欄位都可在 settings.json 覆蓋，不進程式碼。
+
+## D14. routing 棄「信心閥值」，改三向分類：answer / code / unclear
+- **決策**：classifier 不再輸出 0–1 信心分數，改輸出三個明確 category：`answer`（問答直答）/ `code`（需可驗收成果）/ `unclear`（真的無法判斷）。`unclear` 觸發 `clarify_routing` 模式，問使用者 A/B。
+- **為什麼**：gpt-oss-120b 是推理模型，reasoning 過後才輸出，commit 後信心幾乎都在 0.85–0.99，閾值 0.8 等於無效。信心分數本身在推理模型上不可信賴。三向分類讓「不確定」成為一等公民，語意比閥值更穩定。
+- **否決**：否決「調整信心閥值」的方向——根本問題是推理模型不輸出低信心，調閾值沒用。
+- **實作**：`response_format={"type":"json_object"}` 強制結構輸出；system prompt 指定 category 只能是三個值之一；任何解析失敗 fallback → `unclear`（寧可多問不猜）。
+
+## D15. maker_model 欄位曾是死欄位（已修）
+- **決策**：`settings["maker_model"]` 現在會覆蓋 `mapping.py` 的硬編碼，生效優先序：settings.json > mapping.py > triple.model。
+- **為什麼**：原始實作 maker.py 直接用 `triple.model`（來自 mapping.py），settings 寫什麼 maker 都看不到，是靜默失效的 bug。
+- **Backlog**：maker 的 *預設*模型仍是 mapping.py 的 `agnes`，開發期夠用但不夠強（見 D17）。
+
+## D16. gpt-oss-120b:free（OpenRouter）定為開發期 classifier 預設
+- **決策**：`plan_model` 預設 alias 為 `openrouter-classifier`，指向 `openrouter/openai/gpt-oss-120b`，via OpenRouter 免費額度。
+- **為什麼**：試過 Qwen 系列（全部速率受限，Venice provider pool 共享），gpt-oss-120b 實際可用、推理能力支撐三向分類。需要 `max_tokens=2000` 讓推理模型有 CoT 空間才能輸出有效 JSON。
+- **邊界**：免費路由限制與訓練資料疑慮同 D12 backlog，此為開發期暫定。
+
+## D17. maker 需要強力 coding 模型（待換，現仍 agnes）
+- **決策**：maker 應換成能真正寫程式的模型（DeepSeek V3 或 gpt-oss-120b），而非 8B 的 agnes。
+- **為什麼**：D15 修好接線後，問題浮現：欄位通了，但 maker 預設仍是 agnes。核心細胞驗證（D9）要求 Maker 真能寫出通過 pytest 的程式碼，agnes 能力不足。
+- **狀態**：Backlog。接線已修，換預設模型是下一步，需 Ryan 拍板模型字串。
+
+## D18. Agnes 定位：多模態工具接入層，非文字主力
+- **決策**：Agnes 的正確用途是圖片/影片理解（多模態能力），掛在 MCP 工具層（roadmap 階段二）。不用於文字生成、推理、寫程式等主力任務。
+- **為什麼**：Agnes 是 8B SEA LLM，文字任務無法取代 Sonnet/DeepSeek 等中階模型（見 D6）。但它有多模態能力，做視覺 tool 是差異化用途，不是降級替代品。
+- **邊界**：階段二 MCP 工具層落地前不動 Agnes 接線。現在 agnes alias 保留作 checker_fallback（成本極低的 fallback 用途）。
+
+---
+
 ## 待決策（尚未拍板，留給後續）
+- maker 模型字串換成 DeepSeek V3 或 gpt-oss-120b（D17 後續行動，需 Ryan 拍板）。
 - align 階段 Plan 的輸出結構，以及多 agent 派工的拆解粒度。
 - 真沙箱隔離方案（目前 subprocess 跑同機 temp dir，有安全債，記 backlog）。

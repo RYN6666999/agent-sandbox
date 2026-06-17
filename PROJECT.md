@@ -89,10 +89,16 @@ Postgres、Redis、Docker、雲端服務（資料隱私 + 降複雜度）。
 - `orchestrator/checker.py` — Checker（真跑 pytest 的驗證器）
 - `orchestrator/safety.py` — 危險指令規則攔截
 - `orchestrator/clarify.py` — 模糊輸入反問閘門
+- `orchestrator/maker.py` — Maker（執行層，settings["maker_model"] 覆蓋 mapping.py）
+- `orchestrator/model_registry.py` — alias → LiteLLM kwargs（3 tier：alias / openrouter/ / raw）
 - `align/core.py` — align 階段產出可派工 task brief
-- `api/main.py` — /chat 與 /converse 端點
+- `api/main.py` — /chat 與 /converse 端點；clarify_routing mode；forced_mode 支援
+- `router/classifier.py` — routing_intent()：3向分類（answer/code/unclear）
 - `router/` — 模型/技能路由
 - `contracts/` — TaskSpec 規格定義
+- `data/settings.json` — 執行期設定（plan_model / maker_model / checker_model / ...）
+- `ui/src/store.ts` — 前端狀態機（Zustand）
+- `ui/src/api.ts` — 前端 → 後端 HTTP contract
 
 ---
 
@@ -107,7 +113,7 @@ Plan 階段必須固定以下三種停損，不可事後才補：
 
 ## 五、目前進度 (Status — 接手前必讀)
 
-已完成（部分已 commit，push 狀態見 git log）：
+已完成（git log 可查）：
 - [x] **審計日誌** decision_log：兩表、event_type 區分 intent_gate / execution_route、
       單 request_id 查完整決策鏈、寫入失敗不阻斷主流程。
 - [x] **Checker 真跑 pytest**：subprocess + timeout=60，過=10 / 敗=2 / 逾時=0，
@@ -115,10 +121,19 @@ Plan 階段必須固定以下三種停損，不可事後才補：
 - [x] **clarify gate**：模糊/過短輸入先反問一句。
 - [x] **safety gate**：規則攔截破壞性指令，只擋炸環境的、不擋業務刪除，已移到 clarify 之前。
 - [x] **/converse 閒聊 vs /chat 任務分流**：按鈕區分，/converse 改同步阻塞回傳
-      （修掉 WebSocket 競態條件），69 測試全綠。
+      （修掉 WebSocket 競態條件）。
+- [x] **routing 3 向分類**：answer / code / unclear，`unclear` 觸發 `clarify_routing` 問 A/B。
+      棄信心閥值（推理模型不輸出低信心）（見 D14）。
+- [x] **model settings 統一**：三個 agent 都從 settings.json 讀模型；
+      maker dead field 修復（見 D15）；model_registry 三 tier resolve（見 D13）。
+- [x] **測試覆蓋**：163 tests（158 pytest + 5 Vitest），涵蓋 API 流程、safety gate bypass 防護、
+      store 狀態機。
 
-進行中：
-- [ ] 用明確 brief 跑完整 Maker→Checker 循環，驗證核心假設（是否收斂、交付是否可用）。
+待做（Backlog）：
+- [ ] maker 換強力 coding 模型（D17，需 Ryan 拍板模型字串）。
+- [ ] 用明確 brief 跑完整 Maker→Checker 循環，驗證核心假設（D9）。
+- [ ] frontend clarify_routing UI（後端已完成，前端 A/B 問答尚未實作）。
+- [ ] Agnes 多模態 MCP 接入（D18，roadmap 階段二）。
 
 ---
 

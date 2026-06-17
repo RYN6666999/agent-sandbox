@@ -137,3 +137,80 @@ def test_parse_answers_no_arrow_fallback():
         "max_rounds": "5",
     })
     assert spec.io_example["input"] == "just some text"
+
+
+# ── /chat (frontend entry point) ──────────────────────────────────────────────
+# These simulate what the UI does on every user message.
+
+def test_chat_question_routes_direct():
+    """Q&A 型輸入 → mode=direct，不走 align。"""
+    r = client.post("/chat", json={"task": "Python 的 GIL 是什麼？"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mode"] == "direct"
+    assert "session_id" in body
+
+
+def test_chat_dangerous_task_blocked():
+    """危險指令 → mode=confirm_dangerous，安全門未繞過。"""
+    r = client.post("/chat", json={"task": "rm -rf /production"})
+    assert r.status_code == 200
+    assert r.json()["mode"] == "confirm_dangerous"
+
+
+def test_chat_empty_task_rejected():
+    r = client.post("/chat", json={"task": "   "})
+    assert r.status_code == 422
+
+
+def test_chat_forced_mode_direct_skips_reclassify():
+    """forced_mode=direct → 直接走 direct，不重新分類。"""
+    r = client.post("/chat", json={"task": "寫個 merge sort", "forced_mode": "direct"})
+    assert r.status_code == 200
+    assert r.json()["mode"] == "direct"
+
+
+def test_chat_forced_mode_align():
+    """forced_mode=align → 走 align 流程，不論任務內容。"""
+    with patch("api.main._run_and_push", new=AsyncMock()):
+        r = client.post("/chat", json={"task": "什麼是遞迴？", "forced_mode": "align"})
+    assert r.status_code == 200
+    assert r.json()["mode"] in ("align", "direct")  # align starts session
+
+
+def test_chat_dangerous_not_bypassed_by_forced_mode():
+    """forced_mode 不能繞過安全門。"""
+    r = client.post("/chat", json={"task": "DROP TABLE users", "forced_mode": "direct"})
+    assert r.status_code == 200
+    assert r.json()["mode"] == "confirm_dangerous"
+
+
+# ── /settings roundtrip ───────────────────────────────────────────────────────
+
+def test_settings_get_returns_valid_shape():
+    r = client.get("/settings")
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("maker_model", "checker_model", "max_rounds", "temperature", "max_tokens"):
+        assert key in body, f"missing key: {key}"
+
+
+def test_settings_post_and_get_roundtrip():
+    orig = client.get("/settings").json()
+    patched = {**orig, "max_rounds": 99}
+    client.post("/settings", json=patched)
+    back = client.get("/settings").json()
+    assert back["max_rounds"] == 99
+    # restore
+    client.post("/settings", json=orig)
+
+
+# ── /models ───────────────────────────────────────────────────────────────────
+
+def test_models_returns_list():
+    r = client.get("/models")
+    assert r.status_code == 200
+    body = r.json()
+    assert "models" in body
+    assert isinstance(body["models"], list)
+    assert len(body["models"]) > 0

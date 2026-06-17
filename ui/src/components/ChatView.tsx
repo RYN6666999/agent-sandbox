@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
-import { chatTask, approveTask, deliverTask, openWs } from "../api";
+import { chatTask, converseMessage, approveTask, deliverTask, openWs } from "../api";
 import { useStore } from "../store";
 
 /** Merge vague original task + user's clarification into a natural sentence. */
@@ -81,6 +81,33 @@ export function ChatView() {
         });
       }
     });
+  }
+
+  async function handleConverse() {
+    if (!input.trim()) return;
+    const rawText = input.trim();
+    setInput("");
+
+    let tid = activeTaskId;
+    if (!tid || useStore.getState().activeTask()?.status !== "idle") {
+      tid = newTask();
+    }
+
+    const t = useStore.getState().tasks.find((x) => x.id === tid)!;
+    const history = t.messages;
+    useStore.getState().updateTask(tid, {
+      title: rawText.slice(0, 28) + (rawText.length > 28 ? "…" : ""),
+      messages: [...history, { role: "user" as const, text: rawText }],
+      status: "running",
+    });
+
+    const res = await converseMessage(rawText, history);
+    useStore.getState().updateTask(tid, {
+      sessionId: res.session_id,
+      messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
+        { role: "system" as const, text: "" }],
+    });
+    attachWs(tid, res.session_id);
   }
 
   async function handleSubmit() {
@@ -327,15 +354,15 @@ export function ChatView() {
           rows={1}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
-            // Cmd+Enter or Ctrl+Enter → send
+            // Cmd+Enter / Ctrl+Enter → chat (default)
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
-              handleSubmit();
+              handleConverse();
               return;
             }
-            // Plain Enter → newline (default textarea behaviour, do nothing)
+            // Plain Enter → newline
           }}
-          placeholder={status !== "idle" ? "任務執行中…" : "輸入任務… (⌘↵ 發送)"}
+          placeholder={status !== "idle" ? "執行中…" : "輸入訊息… (⌘↵ 閒聊 | 點「執行任務」派工)"}
           disabled={status !== "idle"}
           style={{
             flex: 1, background: "#ede8e0", border: "0.5px solid #d4c9bb",
@@ -347,20 +374,32 @@ export function ChatView() {
           }}
         />
         <button
+          onClick={handleConverse}
+          disabled={status !== "idle" || !input.trim()}
+          title="閒聊 (⌘↵)"
+          style={{
+            height: 34, borderRadius: 7, flexShrink: 0, padding: "0 10px",
+            background: (status !== "idle" || !input.trim()) ? "#d4c9bb" : "#7a7065",
+            border: "none",
+            cursor: (status !== "idle" || !input.trim()) ? "not-allowed" : "pointer",
+            fontSize: 12, color: (status !== "idle" || !input.trim()) ? "#b5a99a" : "#f2ede6",
+            transition: "background .15s", whiteSpace: "nowrap",
+          }}
+        >↑ 發送</button>
+        <button
           onClick={handleSubmit}
           disabled={status !== "idle" || !input.trim()}
-          title="發送 (⌘↵)"
+          title="執行任務"
           style={{
-            width: 34, height: 34, borderRadius: 7, flexShrink: 0,
+            height: 34, borderRadius: 7, flexShrink: 0, padding: "0 10px",
             background: (status !== "idle" || !input.trim()) ? "#d4c9bb" : "#3d352a",
             border: "none",
             cursor: (status !== "idle" || !input.trim()) ? "not-allowed" : "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 14,
+            fontSize: 12, fontWeight: 600,
             color: (status !== "idle" || !input.trim()) ? "#b5a99a" : "#f2ede6",
-            transition: "background .15s",
+            transition: "background .15s", whiteSpace: "nowrap",
           }}
-        >↑</button>
+        >▶ 執行任務</button>
       </div>
     </div>
   );

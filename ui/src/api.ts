@@ -15,6 +15,18 @@ export async function chatTask(task: string): Promise<{
   return r.json();
 }
 
+export async function converseMessage(
+  message: string,
+  history: { role: string; text: string }[]
+): Promise<{ session_id: string; mode: "converse" }> {
+  const r = await fetch(`${BASE}/converse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, history }),
+  });
+  return r.json();
+}
+
 export async function submitTask(task: string) {
   const r = await fetch(`${BASE}/task/submit`, {
     method: "POST",

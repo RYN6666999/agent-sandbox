@@ -43,6 +43,18 @@ class TaskRequest(BaseModel):
         return v
 
 
+class ConverseRequest(BaseModel):
+    message: str
+    history: list[dict] = []   # [{role: "user"|"system", text: str}, ...]
+
+    @field_validator("message")
+    @classmethod
+    def message_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("message must not be empty")
+        return v
+
+
 class ApproveRequest(BaseModel):
     session_id: str
     spec: dict             # TaskSpec fields confirmed by user
@@ -232,24 +244,73 @@ def _make_direct_spec(task: str) -> TaskSpec:
     )
 
 
+@app.post("/converse")
+async def converse_endpoint(req: ConverseRequest):
+    """Chat path: direct LLM reply with recent conversation context. No task routing."""
+    import litellm
+    from orchestrator.model_registry import resolve as _resolve
+
+    # Build messages: history (last 10) + current message
+    lm_messages = []
+    for m in req.history[-10:]:
+        role = "user" if m.get("role") == "user" else "assistant"
+        lm_messages.append({"role": role, "content": m.get("text", "")})
+    lm_messages.append({"role": "user", "content": req.message})
+
+    session_id = str(uuid.uuid4())[:8]
+    sessions[session_id] = {"raw_task": req.message, "status": "running", "mode": "converse"}
+
+    async def _stream():
+        loop = asyncio.get_event_loop()
+        try:
+            params = _resolve("agnes")
+            resp = await asyncio.to_thread(
+                litellm.completion,
+                messages=lm_messages,
+                max_tokens=1024,
+                temperature=0.7,
+                stream=True,
+                **params,
+            )
+            full = ""
+            for chunk in resp:
+                token = (chunk.choices[0].delta.content or "") if chunk.choices else ""
+                if token:
+                    full += token
+                    await push(session_id, "token", {"text": token})
+            sessions[session_id]["output"] = full
+            sessions[session_id]["status"] = "done"
+            await push(session_id, "result", {
+                "status": "done", "output": full,
+                "rounds": 1, "final_score": None, "history": [],
+            })
+        except Exception as e:
+            sessions[session_id]["status"] = "error"
+            await push(session_id, "error", {"msg": str(e)})
+
+    asyncio.create_task(_stream())
+    return {"session_id": session_id, "mode": "converse"}
+
+
 @app.post("/chat")
 async def chat_endpoint(req: TaskRequest):
     """Smart routing: clarify → direct answer or alignment flow."""
     from orchestrator.clarify import needs_clarification
     session_id = str(uuid.uuid4())[:8]
 
-    # Clarification gate — runs before intent classification, 0–1 LLM calls
-    should_clarify, question = needs_clarification(req.task)
-    if should_clarify:
-        sessions[session_id] = {"raw_task": req.task, "status": "clarifying"}
-        return {"session_id": session_id, "mode": "clarify", "question": question}
-
-    # Safety gate — pure rules, 0 LLM calls
+    # Safety gate first — dangerous ops blocked before any LLM call
     from orchestrator.safety import is_dangerous
     dangerous, triggers = is_dangerous(req.task)
     if dangerous:
         sessions[session_id] = {"raw_task": req.task, "status": "confirm_dangerous"}
         return {"session_id": session_id, "mode": "confirm_dangerous", "triggers": triggers}
+
+    # Clarification gate — 0–1 LLM calls
+    from orchestrator.clarify import needs_clarification
+    should_clarify, question = needs_clarification(req.task)
+    if should_clarify:
+        sessions[session_id] = {"raw_task": req.task, "status": "clarifying"}
+        return {"session_id": session_id, "mode": "clarify", "question": question}
 
     request_id = session_id  # v1: same value, keep separate field for future split
     decision_log.record_request_trace(

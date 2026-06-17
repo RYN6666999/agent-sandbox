@@ -1,0 +1,4 @@
+{
+  "output": "There is no single \"current\" list of callable agents as it depends entirely on the framework or platform you are using (e.g., LangChain, AutoGen, CrewAI). Popular open-source frameworks include:\n1. **LangChain Agents** (ReAct, Zero-shot)\n2. **Microsoft AutoGen**\n3. **CrewAI**\n4. **AutoGPT**\n\nFor specific implementations, check your project's dependencies.\n\nSkipped: Detailed code examples for each framework. Add them if you specify the stack.",
+  "round": 4
+}

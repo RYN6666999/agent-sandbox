@@ -1,0 +1,4 @@
+{
+  "output": "There is no single universal list of \"agents\" because the term covers many frameworks (LangChain, AutoGen, CrewAI) and cloud services (OpenAI Assistants, AWS Bedrock Agents).\n\nTo give you a specific answer, please specify:\n1. **Context**: Are you looking for open-source libraries, cloud APIs, or enterprise tools?\n2. **Language**: Python, JavaScript, etc.?\n3. **Use Case**: Coding, research, customer support?\n\nWithout this, I cannot provide a relevant list.",
+  "round": 2
+}

@@ -1,0 +1,6 @@
+{
+  "round": 4,
+  "score": 0.0,
+  "passed": false,
+  "feedback": "The output is incorrect because it provides a Python code snippet instead of the expected Chinese text '測試'. [no progress]"
+}

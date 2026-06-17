@@ -1,0 +1,26 @@
+{
+  "status": "done",
+  "output": "cashflow=9000 round=3",
+  "rounds": 3,
+  "final_score": 8.0,
+  "history": [
+    {
+      "round": 1,
+      "score": 4.0,
+      "passed": false,
+      "feedback": "score=4.0"
+    },
+    {
+      "round": 2,
+      "score": 5.5,
+      "passed": false,
+      "feedback": "score=5.5"
+    },
+    {
+      "round": 3,
+      "score": 8.0,
+      "passed": true,
+      "feedback": "score=8.0"
+    }
+  ]
+}

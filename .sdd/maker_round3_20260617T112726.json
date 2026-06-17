@@ -1,0 +1,4 @@
+{
+  "output": "Connection test failed. The API quota for `gemini-2.0-flash` has been exhausted (Rate Limit 429). Please wait ~35 seconds or check billing/plan limits.",
+  "round": 3
+}

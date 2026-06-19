@@ -44,8 +44,12 @@
 │   Opus 4.8（GenSpark）— 顧問                              │
 │   └─ 不進產線，需要時才諮詢                                │
 │                                                         │
-│   Gemini（super-engine）— 小雜工                          │
-│   └─ 摘要、分類、格式轉換等廉價任務                        │
+│   Gemini（super-engine）— 小雜工（僅文字）                    │
+│   └─ 摘要、分類、格式轉換等廉價任務，不能看圖                  │
+│                                                         │
+│   Agnes（api）— 多模態工具                                  │
+│   └─ 看圖（agnes-2.0-flash）、產圖（agnes-image）、          │
+│      產影片（agnes-video）、+ 便宜閒聊                      │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -107,7 +111,8 @@
 - **AgentOS** 是 Scream 下方的基礎設施層，提供安全、審計、調度能力，但不參與智力判斷。
 - **Claude CLI** 是驗收角色，只在需要真實驗收時被 Scream 調用，不寫 code。
 - **Opus 4.8** 是顧問，非產線一環，Scream 遇到架構難題時才諮詢。
-- **Gemini（super-engine）** 是小雜工，負責摘要、分類、格式轉換等廉價任務。
+- **Gemini（super-engine）** 是小雜工（僅文字），負責摘要、分類、格式轉換等廉價任務。
+- **Agnes** 是多模態工具（看圖、產圖、產影片），補 Gemini 的文字-only 缺口。目前作為 converse 閒聊預設模型。其 image/video 系列尚未整合為 executor。
 - **腦庫**是底層共用資源（記憶），所有 agent 透過統一介面讀寫，不直接碰資料庫。
 - **MCP**是工具接入層（手腳），agent 透過它對外。
 - **MCP 工具的調用必須經過 safety gate 與 audit log**，不可繞過。

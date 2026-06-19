@@ -42,6 +42,18 @@ _MODEL_PARAMS: dict[str, dict] = {
         "api_base": "https://apihub.agnes-ai.com/v1",
         "free": False,
     },
+    "agnes-image": {
+        "model": "openai/agnes-image-2.1-flash",
+        "api_key": os.environ.get("AGNES_API_KEY", ""),
+        "api_base": "https://apihub.agnes-ai.com/v1",
+        "free": False,
+    },
+    "agnes-video": {
+        "model": "openai/agnes-video-v2.0",
+        "api_key": os.environ.get("AGNES_API_KEY", ""),
+        "api_base": "https://apihub.agnes-ai.com/v1",
+        "free": False,
+    },
 }
 
 ALIASES: list[str] = list(_MODEL_PARAMS.keys())

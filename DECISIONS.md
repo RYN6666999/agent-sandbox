@@ -107,11 +107,20 @@
 - **狀態**：Backlog。接線已修，換預設模型是下一步，需 Ryan 拍板模型字串。
 - **v3 更新**：此決策在 v3 角色重構後已不適用 — Scream 接手執行層，maker_model 不再為 AgentOS 的主要執行路徑。模型選擇由 Scream Code 環境決定，不再由 settings.json 的 maker_model 控制。
 
-## D18. Agnes 定位：多模態工具接入層，非文字主力
-- **決策**：Agnes 的正確用途是圖片/影片理解（多模態能力），掛在 MCP 工具層（roadmap 階段二）。不用於文字生成、推理、寫程式等主力任務。
-- **為什麼**：Agnes 是 8B SEA LLM，文字任務無法取代 Sonnet/DeepSeek 等中階模型（見 D6）。但它有多模態能力，做視覺 tool 是差異化用途，不是降級替代品。
-- **邊界**：階段二 MCP 工具層落地前不動 Agnes 接線。現在 agnes alias 保留作 checker_fallback（成本極低的 fallback 用途）。
-- **v3 更新**：Agnes 仍保留作 converse 預設模型與 checker_fallback。其多模態 MCP 接入留待階段二評估。
+## D18. Agnes 定位：多模態工具接入層，非文字主力（v3 更新）
+- **原始決策**：Agnes 的正確用途是圖片/影片理解（多模態能力），掛在 MCP 工具層。不用於文字生成、推理、寫程式等主力任務。
+- **為什麼**：Agnes 是透過 `apihub.agnes-ai.com` 接入的 API 服務，非本機 8B 模型。文字品質低於 Sonnet/DeepSeek，但多模態是獨特差異化能力。
+- **v3 實際發現**：Agnes API 實際提供 **5 個模型**，我們只用了其中一個：
+  | 模型 | 能力 | 目前使用 |
+  |---|---|---|
+  | `agnes-2.0-flash` | 文字 + 視覺理解（看圖） | ✅ converse 閒聊、checker_fallback |
+  | `agnes-image-2.1-flash` | **圖片生成** | ❌ 未接入 |
+  | `agnes-image-2.0-flash` | **圖片生成**（舊版） | ❌ 未接入 |
+  | `agnes-video-v2.0` | **影片理解/生成** | ❌ 未接入 |
+  | `agnes-1.5-flash` | 舊版文字 | ❌ 未使用 |
+- **關鍵缺陷**：我們的 Gemini 線路（super-engine）只能傳文字，無法傳圖片。Agnes-2.0-flash 是目前系統中**唯一能「看圖」的模型**。image/video 系列模型則是系統中**唯一能產圖/產影片的模型**。
+- **邊界**：Agnes 不適合高品質文字生成／推理／寫程式。image/video 模型需整合為 AgentOS executor 後才能在系統中使用。
+- **可推翻條件**：若未來接上其他多模態模型（如 Gemini API 直接接入），Agnes 角色可重新評估。
 
 ---
 

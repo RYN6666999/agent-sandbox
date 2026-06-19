@@ -13,7 +13,8 @@
 | **Checker** | **Claude CLI** | 跑 pytest 驗收、程式碼審查、給 feedback — **不寫 code** | 用完即焚，無持久 session | QA 部門（不碰烙鐵） |
 | **Action (回圈層)** | **AgentOS** | safety gate、audit log、executor registry、checker proxy、腦庫、黑板 | 沒有智商，只有規則和設備 | NCC / 規章制度 |
 | **顧問** | **Opus 4.8 (GenSpark)** | 戰略判斷、架構審查、重大決策 | **不進產線**，只能透過 gbrain / super-engine 溝通 | 蘋果董事會 |
-| **小雜工** | **Gemini (super-engine)** | 廉價任務：摘要、分類、提取、格式轉換 | 品質不穩定，不適合高風險任務 | 工讀生 |
+| **小雜工** | **Gemini (super-engine)** | 廉價任務：摘要、分類、提取、格式轉換 | 僅文字，無法多模態 | 工讀生（只打字） |
+| **多模態工具** | **Agnes (api)** | 看圖、產圖（agnes-image）、產影片（agnes-video）、廉價閒聊 | 文字品質不穩，不適合高風險任務 | 美編 + 總機 |
 
 ### 從 v2 到 v3 的關鍵變化
 
@@ -89,11 +90,12 @@ v3 的 API 端點 — `/task/make` 已移除或降級，Scream 不再透過 Agen
 | `GET /executors` | 列出 executor（Checker / super-engine） | 保留 |
 | ~~`POST /task/make`~~ | ~~Scream → AgentOS → call LLM~~ | **已移除** |
 
-### 3.3 Scream → Gemini（小雜工，雙路徑）
+### 3.3 Scream → Gemini / Agnes（小雜工 + 多模態工具）
 
 ```
-高價值：Scream → AgentOS registry → super-engine daemon → Gemini
-低價值：Scream → super-engine daemon（直接 call, localhost:3456/ask）
+文字雜工 → Gemini daemon（localhost:3456/ask，僅文字）
+多模態任務 → Agnes API（看圖、產圖、產影片）
+便宜閒聊  → Agnes-2.0-flash（converse 路徑）
 ```
 
 ---

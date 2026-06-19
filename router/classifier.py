@@ -92,7 +92,7 @@ def routing_intent(task: str) -> RoutingIntent:
                 {"role": "system", "content": _ROUTING_SYSTEM},
                 {"role": "user", "content": task},
             ],
-            max_tokens=2000,   # reasoning model needs space for CoT before output
+            max_tokens=200,   # JSON output only needs ~50 tokens; CoT is internal
             temperature=0.0,
             response_format={"type": "json_object"},
             **params,

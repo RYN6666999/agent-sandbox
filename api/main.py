@@ -34,7 +34,7 @@ ws_clients: dict[str, WebSocket] = {}
 
 class TaskRequest(BaseModel):
     task: str
-    forced_mode: str | None = None   # "direct" | "align" — skips routing, set after clarify_routing
+    forced_mode: str | None = None   # "direct" | "align" | "loop" — skips routing
 
     @field_validator("task")
     @classmethod
@@ -69,7 +69,8 @@ class DeliverRequest(BaseModel):
 
 class SettingsPayload(BaseModel):
     plan_model: str = "openrouter-classifier"    # D16: classifier / routing intent
-    maker_model: str = "agnes"                   # D17 pending: should be strong coding model
+    maker_model: str = "gpt-oss-120b"             # D17: strong coding model via OpenRouter
+    converse_model: str = "agnes"                 # fast model for /converse chat path
     checker_model: str = "gemini-flash"          # LLM path only; pytest path uses no model
     checker_fallbacks: list[str] = ["agnes"]
     routing_confidence_threshold: float = 0.8   # kept for reference; D11 now uses 3-way intent
@@ -203,10 +204,82 @@ def save_settings(payload: SettingsPayload):
     return {"ok": True}
 
 
+_or_free_cache: list[str] = []
+_or_free_fetched_at: float = 0.0
+_OR_CACHE_TTL = 3600.0  # 1 hour
+
+
+def _fetch_openrouter_free(api_key: str) -> list[str]:
+    import time
+    import urllib.request
+    global _or_free_cache, _or_free_fetched_at
+
+    now = time.time()
+    if _or_free_cache and now - _or_free_fetched_at < _OR_CACHE_TTL:
+        return _or_free_cache
+
+    try:
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/models",
+            headers={"Authorization": f"Bearer {api_key}", "HTTP-Referer": "http://localhost"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+        free = [
+            f"openrouter/{m['id']}"
+            for m in data.get("data", [])
+            if str(m.get("pricing", {}).get("prompt", "1")) == "0"
+        ]
+        _or_free_cache = sorted(free)
+        _or_free_fetched_at = now
+    except Exception:
+        pass  # keep stale cache or return empty
+
+    return _or_free_cache
+
+
 @app.get("/models")
 def list_models():
-    from orchestrator.model_registry import ALIASES
-    return {"models": ALIASES}
+    from orchestrator.model_registry import PAID_MODELS
+    settings = _load_settings()
+    api_key = settings.get("api_keys", {}).get("openrouter") or os.environ.get("OPENROUTER_API_KEY", "")
+    free = _fetch_openrouter_free(api_key) if api_key else []
+    return {"free": free, "paid": PAID_MODELS}
+
+
+def _make_loop_spec(task: str) -> TaskSpec:
+    """Forced full Maker/Checker loop — skips align, keeps raw task as-is."""
+    return TaskSpec(
+        why=task,
+        io_example={"input": task, "expected_output": "working code with passing tests"},
+        taste=[
+            "Output EXACTLY ONE ```python ... ``` fenced code block. No other code blocks.",
+            "The single block must contain BOTH the implementation AND the pytest tests.",
+            "NEVER use 'from solution import ...' or 'import solution' — "
+            "define ALL functions in the same block as the tests.",
+            "Tests must call the function directly, e.g. `assert flatten([1,[2]]) == [1,2]`.",
+        ],
+        boundaries=[],
+        stop_on_metric="correctness and completeness",
+        max_rounds=5,
+    )
+
+
+def _make_investigate_spec(task: str) -> TaskSpec:
+    """Investigation task — delegates to Claude Code CLI (uses Pro + all tools)."""
+    return TaskSpec(
+        why=task,
+        io_example={"input": task, "expected_output": "findings with concrete evidence and root cause"},
+        taste=[
+            "Use all available tools (browser, file system, bash) to gather real evidence.",
+            "Report specific findings: file paths, line numbers, timestamps, exact values.",
+            "State the root cause clearly at the end.",
+        ],
+        boundaries=["Do not guess without evidence", "Do not ask clarifying questions — investigate and report"],
+        stop_on_metric="concrete findings with evidence",
+        max_rounds=2,
+        executor="claude-code",
+    )
 
 
 def _make_direct_spec(task: str) -> TaskSpec:
@@ -227,7 +300,7 @@ async def converse_endpoint(req: ConverseRequest):
     import litellm
     from orchestrator.model_registry import resolve as _resolve
 
-    CONVERSE_TIMEOUT = 30  # seconds
+    CONVERSE_TIMEOUT = 60  # seconds
 
     lm_messages = []
     for m in req.history[-10:]:
@@ -236,7 +309,8 @@ async def converse_endpoint(req: ConverseRequest):
     lm_messages.append({"role": "user", "content": req.message})
 
     try:
-        params = _resolve("agnes")
+        converse_model = _load_settings().get("converse_model", "agnes")
+        params = _resolve(converse_model)
         resp = await asyncio.wait_for(
             asyncio.to_thread(
                 litellm.completion,
@@ -274,6 +348,58 @@ async def chat_endpoint(req: TaskRequest):
     if dangerous:
         sessions[session_id] = {"raw_task": req.task, "status": "confirm_dangerous"}
         return {"session_id": session_id, "mode": "confirm_dangerous", "triggers": triggers}
+
+    # forced_mode == "loop": user explicitly chose full Maker/Checker, skip clarify + align
+    if req.forced_mode == "loop":
+        request_id = session_id
+        spec = _make_loop_spec(req.task)
+        decision_log.record_request_trace(
+            request_id=request_id,
+            session_id=session_id,
+            entrypoint="chat",
+            raw_task=req.task,
+            latest_status="running",
+            notes={"forced_mode": "loop"},
+        )
+        decision_log.record_intent_gate(
+            request_id=request_id,
+            session_id=session_id,
+            decision="loop",
+            decision_source="user_forced",
+            confidence=1.0,
+            details={"reason": "user picked override → direct full loop"},
+        )
+        sessions[session_id] = {
+            "request_id": request_id,
+            "raw_task": req.task,
+            "status": "running",
+            "spec": spec.model_dump(),
+        }
+        decision_log.update_request_status(request_id, "running")
+        asyncio.create_task(_run_and_push(session_id, spec))
+        return {"session_id": session_id, "mode": "loop"}
+
+    # forced_mode == "investigate": delegate to Claude Code CLI
+    if req.forced_mode == "investigate":
+        request_id = session_id
+        spec = _make_investigate_spec(req.task)
+        decision_log.record_request_trace(
+            request_id=request_id,
+            session_id=session_id,
+            entrypoint="chat",
+            raw_task=req.task,
+            latest_status="running",
+            notes={"forced_mode": "investigate"},
+        )
+        sessions[session_id] = {
+            "request_id": request_id,
+            "raw_task": req.task,
+            "status": "running",
+            "spec": spec.model_dump(),
+        }
+        decision_log.update_request_status(request_id, "running")
+        asyncio.create_task(_run_and_push(session_id, spec))
+        return {"session_id": session_id, "mode": "investigate"}
 
     # forced_mode: user answered clarify_routing question — skip re-routing
     if req.forced_mode in ("direct", "align"):
@@ -476,9 +602,11 @@ async def _run_and_push(session_id: str, spec: TaskSpec):
             push(session_id, "token", {"text": token}), loop
         )
 
+    maker_model = _load_settings().get("maker_model", "unknown")
+
     def on_round_start(round_n: int):
         asyncio.run_coroutine_threadsafe(
-            push(session_id, "round_start", {"round": round_n}), loop
+            push(session_id, "round_start", {"round": round_n, "model": maker_model}), loop
         )
 
     try:

@@ -16,7 +16,14 @@ export interface TaskSession {
   history: HistoryEntry[];
   finalScore: number | null;
   logs: string[];
-  messages: { role: "user" | "system"; text: string }[];
+  messages: {
+    role: "user" | "system";
+    text: string;
+    model?: string;
+    overrideOption?: boolean;
+    overrideUsed?: boolean;
+    originalTask?: string;
+  }[];
   createdAt: number;
 }
 

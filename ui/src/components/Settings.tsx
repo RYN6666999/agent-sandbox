@@ -3,7 +3,8 @@ import { getSettings, saveSettings, listModels, AppSettings, McpServer } from ".
 import { useStore } from "../store";
 
 const DEFAULT: AppSettings = {
-  maker_model: "agnes",
+  converse_model: "agnes",
+  maker_model: "gpt-oss-120b",
   checker_model: "gemini-flash",
   checker_fallbacks: ["agnes"],
   max_rounds: 5,
@@ -27,7 +28,7 @@ export function Settings() {
   const { settingsOpen, setSettingsOpen } = useStore();
   const [tab, setTab] = useState<Tab>("models");
   const [s, setS] = useState<AppSettings>(DEFAULT);
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<{ free: string[]; paid: string[] }>({ free: [], paid: [] });
   const [saved, setSaved] = useState(false);
   const [newMcp, setNewMcp] = useState<Omit<McpServer, "enabled">>({ name: "", url: "" });
 
@@ -53,7 +54,8 @@ export function Settings() {
     setNewMcp({ name: "", url: "" });
   }
 
-  const modelOpts = models.length ? models : ["agnes", "gemini-flash", "claude-sonnet", "ollama-local"];
+  const freeOpts = models.free.length ? models.free : ["gpt-oss-120b", "deepseek-v3", "openrouter-classifier"];
+  const paidOpts = models.paid.length ? models.paid : ["claude-opus", "claude-sonnet", "gemini-flash", "agnes"];
 
   const C = {
     bg: "#f2ede6", surface: "#ede8e0", border: "#d4c9bb",
@@ -133,19 +135,18 @@ export function Settings() {
 
               {/* ── Models ── */}
               {tab === "models" && <>
+                <Field label="Converse model" hint="閒聊用，快速便宜">
+                  <ModelSelect value={s.converse_model ?? "gemini-flash"} onChange={(v) => patch({ converse_model: v })} free={freeOpts} paid={paidOpts} style={inp} />
+                </Field>
                 <Field label="Maker model" hint="執行任務的主力模型">
-                  <select value={s.maker_model} onChange={(e) => patch({ maker_model: e.target.value })} className="st-inp" style={inp}>
-                    {modelOpts.map((o) => <option key={o}>{o}</option>)}
-                  </select>
+                  <ModelSelect value={s.maker_model} onChange={(v) => patch({ maker_model: v })} free={freeOpts} paid={paidOpts} style={inp} />
                 </Field>
                 <Field label="Checker model" hint="評分反饋的模型">
-                  <select value={s.checker_model} onChange={(e) => patch({ checker_model: e.target.value })} className="st-inp" style={inp}>
-                    {modelOpts.map((o) => <option key={o}>{o}</option>)}
-                  </select>
+                  <ModelSelect value={s.checker_model} onChange={(v) => patch({ checker_model: v })} free={freeOpts} paid={paidOpts} style={inp} />
                 </Field>
                 <Field label="Checker fallbacks" hint="Checker 失敗時依序嘗試（點選切換）">
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {modelOpts.filter((m) => m !== s.checker_model).map((m) => {
+                    {[...freeOpts, ...paidOpts].filter((m) => m !== s.checker_model).map((m) => {
                       const on = s.checker_fallbacks.includes(m);
                       return (
                         <button key={m} onClick={() => patch({
@@ -276,9 +277,10 @@ export function Settings() {
                   永久保存請在 <code style={{ fontSize: 10 }}>.env</code> 檔案中設定。
                 </div>
                 {[
-                  { key: "agnes",     label: "Agnes API Key",     env: "AGNES_API_KEY" },
-                  { key: "gemini",    label: "Gemini API Key",    env: "GEMINI_API_KEY" },
-                  { key: "anthropic", label: "Anthropic API Key", env: "ANTHROPIC_API_KEY" },
+                  { key: "agnes",       label: "Agnes API Key",       env: "AGNES_API_KEY" },
+                  { key: "gemini",      label: "Gemini API Key",       env: "GEMINI_API_KEY" },
+                  { key: "anthropic",   label: "Anthropic API Key",    env: "ANTHROPIC_API_KEY" },
+                  { key: "openrouter",  label: "OpenRouter API Key",   env: "OPENROUTER_API_KEY" },
                 ].map(({ key, label, env }) => (
                   <Field key={key} label={label} hint={env}>
                     <input className="st-inp" type="password" placeholder="sk-…"
@@ -322,6 +324,25 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       {hint && <div style={{ fontSize: 11, color: "#b5a99a", marginBottom: 7 }}>{hint}</div>}
       {children}
     </div>
+  );
+}
+
+function ModelSelect({ value, onChange, free, paid, style }: {
+  value: string;
+  onChange: (v: string) => void;
+  free: string[];
+  paid: string[];
+  style: React.CSSProperties;
+}) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className="st-inp" style={style}>
+      <optgroup label="免費">
+        {free.map((o) => <option key={o} value={o}>{o}</option>)}
+      </optgroup>
+      <optgroup label="付費">
+        {paid.map((o) => <option key={o} value={o}>{o}</option>)}
+      </optgroup>
+    </select>
   );
 }
 

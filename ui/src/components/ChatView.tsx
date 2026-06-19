@@ -46,9 +46,9 @@ export function ChatView() {
         useStore.getState().updateTask(tid, { logs: [...(cur().logs ?? []), (e.data as { msg: string }).msg] });
       }
       if (e.event === "round_start") {
-        const round = (e.data as { round: number }).round;
+        const { round, model } = e.data as { round: number; model?: string };
         useStore.getState().updateTask(tid, {
-          messages: [...cur().messages, { role: "system" as const, text: `**Round ${round}** — 生成中…\n\n` }],
+          messages: [...cur().messages, { role: "system" as const, text: `**Round ${round}** — 生成中…\n\n`, model }],
         });
       }
       if (e.event === "token") {
@@ -160,6 +160,14 @@ export function ChatView() {
       useStore.getState().updateTask(tid, {
         sessionId: res.session_id,
         messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
+          { role: "system", text: "", overrideOption: true, originalTask: taskText }],
+      });
+      attachWs(tid, res.session_id);
+
+    } else if (res.mode === "loop" || res.mode === "investigate") {
+      useStore.getState().updateTask(tid, {
+        sessionId: res.session_id,
+        messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
           { role: "system", text: "" }],
       });
       attachWs(tid, res.session_id);
@@ -171,8 +179,61 @@ export function ChatView() {
         questions: res.questions ?? [],
         status: "aligning",
         messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
-          { role: "system", text: "這個任務比較複雜，對齊一下讓我更好地完成它：" }],
+          { role: "system", text: "這個任務比較複雜，對齊一下讓我更好地完成它：",
+            overrideOption: true, originalTask: taskText }],
       });
+    }
+  }
+
+  async function handleOverride(msgIndex: number, originalTask: string) {
+    const t = useStore.getState().activeTask();
+    if (!t) return;
+    const tid = t.id;
+
+    const lockedMsgs = t.messages.map((m, i) =>
+      i === msgIndex ? { ...m, overrideUsed: true } : m
+    );
+    useStore.getState().updateTask(tid, {
+      messages: [...lockedMsgs, { role: "user" as const, text: "改用：寫程式 + 驗證" }],
+      status: "running",
+    });
+
+    const res = await chatTask(originalTask, "loop");
+
+    if (res.mode === "loop") {
+      useStore.getState().updateTask(tid, {
+        sessionId: res.session_id,
+        messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
+          { role: "system" as const, text: "" }],
+      });
+      attachWs(tid, res.session_id);
+    }
+  }
+
+  async function handleInvestigate() {
+    if (!input.trim()) return;
+    const rawText = input.trim();
+    setInput("");
+
+    let tid = activeTaskId;
+    if (!tid || useStore.getState().activeTask()?.status !== "idle") {
+      tid = newTask();
+    }
+    const t = useStore.getState().tasks.find((x) => x.id === tid)!;
+    useStore.getState().updateTask(tid, {
+      title: rawText.slice(0, 28) + (rawText.length > 28 ? "…" : ""),
+      messages: [...t.messages, { role: "user", text: rawText }],
+      status: "running",
+    });
+
+    const res = await chatTask(rawText, "investigate");
+    if (res.mode === "investigate") {
+      useStore.getState().updateTask(tid, {
+        sessionId: res.session_id,
+        messages: [...useStore.getState().tasks.find((x) => x.id === tid)!.messages,
+          { role: "system", text: "" }],
+      });
+      attachWs(tid, res.session_id);
     }
   }
 
@@ -246,7 +307,7 @@ export function ChatView() {
             }}>
             {m.role === "system" && (
               <div style={{ fontSize: 10, color: "#c4bfb8", marginBottom: 3, paddingLeft: 2 }}>
-                Agent
+                Agent{m.model ? ` · ${m.model}` : ""}
               </div>
             )}
             <div style={{
@@ -258,6 +319,22 @@ export function ChatView() {
             }}>
               <ReactMarkdown>{m.text}</ReactMarkdown>
             </div>
+
+            {m.overrideOption && (
+              <button
+                onClick={() => !m.overrideUsed && handleOverride(i, m.originalTask ?? "")}
+                disabled={!!m.overrideUsed}
+                style={{
+                  marginTop: 6,
+                  background: m.overrideUsed ? "#d4c9bb" : "#3d352a",
+                  color: m.overrideUsed ? "#b5a99a" : "#f2ede6",
+                  border: "none", borderRadius: 6, padding: "6px 13px",
+                  fontSize: 11, fontWeight: 500,
+                  cursor: m.overrideUsed ? "default" : "pointer",
+                }}>
+                {m.overrideUsed ? "已改用：寫程式 + 驗證" : "改用：寫程式 + 跑測試"}
+              </button>
+            )}
           </div>
         ))}
 
@@ -389,7 +466,7 @@ export function ChatView() {
         <button
           onClick={handleSubmit}
           disabled={status !== "idle" || !input.trim()}
-          title="執行任務"
+          title="執行任務（Maker/Checker loop）"
           style={{
             height: 34, borderRadius: 7, flexShrink: 0, padding: "0 10px",
             background: (status !== "idle" || !input.trim()) ? "#d4c9bb" : "#3d352a",
@@ -400,6 +477,20 @@ export function ChatView() {
             transition: "background .15s", whiteSpace: "nowrap",
           }}
         >▶ 執行任務</button>
+        <button
+          onClick={handleInvestigate}
+          disabled={status !== "idle" || !input.trim()}
+          title="委派 Claude Code 調查（使用完整工具：瀏覽器、檔案系統、bash）"
+          style={{
+            height: 34, borderRadius: 7, flexShrink: 0, padding: "0 10px",
+            background: (status !== "idle" || !input.trim()) ? "#d4c9bb" : "#5a6e8a",
+            border: "none",
+            cursor: (status !== "idle" || !input.trim()) ? "not-allowed" : "pointer",
+            fontSize: 12, fontWeight: 600,
+            color: (status !== "idle" || !input.trim()) ? "#b5a99a" : "#f2ede6",
+            transition: "background .15s", whiteSpace: "nowrap",
+          }}
+        >🔍 調查</button>
       </div>
     </div>
   );

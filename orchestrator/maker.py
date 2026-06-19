@@ -1,6 +1,8 @@
 """Maker: produces output from TaskSpec. Uses router to pick model + skills."""
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -85,11 +87,42 @@ def _mcp_tools_to_litellm(tools: list[dict]) -> list[dict]:
     return out
 
 
+def _make_via_claude_code(spec: TaskSpec, feedback: str, round_n: int,
+                          on_token: "Callable[[str], None] | None") -> str:
+    """Run task via `claude --print` subprocess (uses Pro subscription + all Claude Code tools)."""
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        raise RuntimeError("claude CLI not found on PATH — run `npm install -g @anthropic-ai/claude-code`")
+
+    prompt_parts = [f"Task: {spec.why}"]
+    if spec.taste:
+        prompt_parts.append(f"Requirements: {'; '.join(spec.taste)}")
+    if spec.boundaries:
+        prompt_parts.append(f"Do NOT: {'; '.join(spec.boundaries)}")
+    if feedback and round_n > 1:
+        prompt_parts.append(f"\nPrevious attempt feedback (round {round_n}):\n{feedback}")
+
+    prompt = "\n".join(prompt_parts)
+
+    result = subprocess.run(
+        [claude_bin, "--print", "-p", prompt,
+         "--output-format", "text", "--model", "claude-sonnet-4-6"],
+        capture_output=True, text=True, timeout=300,
+    )
+    output = (result.stdout or result.stderr or "").strip()
+    if on_token and output:
+        on_token(output)
+    return output
+
+
 def make(spec: TaskSpec, feedback: str = "", round_n: int = 1,
          on_token: "Callable[[str], None] | None" = None,
          request_id: str | None = None,
          session_id: str | None = None) -> str:
     """Call the routed model and return raw output string."""
+    if spec.executor == "claude-code":
+        return _make_via_claude_code(spec, feedback, round_n, on_token)
+
     settings = _load_settings()
 
     policy_result = route(spec.why, request_id=request_id, session_id=session_id, round_n=round_n)

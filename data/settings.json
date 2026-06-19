@@ -1,0 +1,20 @@
+{
+  "plan_model": "openrouter-classifier",
+  "maker_model": "openrouter/openai/gpt-oss-120b:free",
+  "converse_model": "agnes",
+  "checker_model": "openrouter/google/gemma-4-26b-a4b-it:free",
+  "checker_fallbacks": [
+    "agnes"
+  ],
+  "routing_confidence_threshold": 0.8,
+  "max_rounds": 5,
+  "temperature": 0.7,
+  "max_tokens": 2048,
+  "system_prompt": "",
+  "mcp_servers": [],
+  "api_keys": {
+    "gemini": "",
+    "agnes": "",
+    "openrouter": ""
+  }
+}

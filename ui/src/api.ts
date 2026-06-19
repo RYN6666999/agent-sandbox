@@ -1,8 +1,8 @@
 const BASE = "http://localhost:8000";
 
-export async function chatTask(task: string): Promise<{
+export async function chatTask(task: string, forcedMode?: "loop" | "investigate"): Promise<{
   session_id: string;
-  mode: "direct" | "align" | "clarify" | "confirm_dangerous";
+  mode: "direct" | "align" | "clarify" | "confirm_dangerous" | "loop" | "investigate";
   questions?: { key: string; q: string }[];
   question?: string;
   triggers?: string[];
@@ -10,7 +10,7 @@ export async function chatTask(task: string): Promise<{
   const r = await fetch(`${BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ task }),
+    body: JSON.stringify({ task, forced_mode: forcedMode }),
   });
   return r.json();
 }
@@ -78,14 +78,15 @@ export async function saveSettings(s: AppSettings): Promise<void> {
   });
 }
 
-export async function listModels(): Promise<string[]> {
+export async function listModels(): Promise<{ free: string[]; paid: string[] }> {
   const r = await fetch(`${BASE}/models`);
   const j = await r.json();
-  return j.models ?? [];
+  return { free: j.free ?? [], paid: j.paid ?? [] };
 }
 
 export interface McpServer { name: string; url: string; enabled: boolean; }
 export interface AppSettings {
+  converse_model: string;
   maker_model: string;
   checker_model: string;
   checker_fallbacks: string[];

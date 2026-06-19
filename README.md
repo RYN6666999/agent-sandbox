@@ -15,8 +15,9 @@
 
 ## 技術棧
 
-FastAPI · LangGraph · LiteLLM · Pydantic · SQLite · MCP · React + Tauri  
-（MVP 階段不用 Postgres / Redis / Docker / 雲端）
+FastAPI · LangGraph · LiteLLM · Pydantic · SQLite · MCP · Playwright  
+（MVP 階段不用 Postgres / Redis / Docker / 雲端）  
+（UI 評估中：React → TUI terminal UI）
 
 ## 快速開始
 

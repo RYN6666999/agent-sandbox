@@ -117,3 +117,32 @@
 - maker 模型字串換成 DeepSeek V3 或 gpt-oss-120b（D17 後續行動，需 Ryan 拍板）。
 - align 階段 Plan 的輸出結構，以及多 agent 派工的拆解粒度。
 - 真沙箱隔離方案（目前 subprocess 跑同機 temp dir，有安全債，記 backlog）。
+
+---
+
+## D19. executor registry 統一 executor 調度，移除硬編碼 subprocess spawn
+- **決策**：新增 `orchestrator/executor_registry.py`，提供 `register()` / `get()` / `list_all()` / `run()` 四介面。`maker.py` 的 `_make_via_claude_code()` 移除，改走 registry。
+- **為什麼**：原本 claude-code executor 的 spawn 邏輯直接寫死在 maker.py 裡，要加第二個 executor（super-engine）就要複製貼上。registry 讓加 executor 變成插拔式的。
+- **否決**：否決「繼續在 maker.py 加 if-else」。registry pattern 比 config-driven 工廠模式更簡單，MVP 夠用。
+- **邊界**：registry 不接管 prompt 組合邏輯（仍留在 maker.py），只負責 spawn + 回 stdout。
+
+## D20. super-engine type 系統：subprocess / super-engine / super-engine-warm
+- **決策**：executor 三種 type：
+  - `subprocess`（預設）— binary + flags + prompt_flag + model
+  - `super-engine` — binary + args + prompt 尾綴（Node.js Playwright 腳本）
+  - `super-engine-warm` — HTTP POST 到常駐 daemon（不 spawn）
+- **為什麼**：每個 type 的命令建構邏輯不同。用 type 字段區分比在 args 裡塞 magic flag 更清楚。
+- **否決**：否決「統一用一個 type 靠 args 硬拆」。
+- **可推翻條件**：若有統一的 A2A protocol 取代 HTTP daemon，可棄用 super-engine-warm type。
+
+## D21. Keep-warm daemon 模式：HTTP server 取代反覆 subprocess spawn
+- **決策**：`super-engine/ask-daemon.ts` — 啟動時開一次 Brave，監聽 localhost:3456。後續 POST /ask 直接重用瀏覽器，不重開。registry 的 `super-engine-warm` type 透過 HTTP 與 daemon 溝通。
+- **為什麼**：one-shot `node ask.ts` 每次要開瀏覽器 + 載入 profile + 導航頁面，耗時 3-5s。daemon 模式把 Gemini 從 64s 降到 2.3s（28x 加速）。
+- **否決**：否決「用 stdin/stdout pipe 保持瀏覽器 alive」— HTTP 更標準、好 debug、未來可接多個 client。
+- **邊界**：daemon 目前不支援 headless（GenSpark 封鎖 headless Chromium）。Gemini headless 也失敗，需要進階反偵測。
+
+## D22. TUI 方向取代 React desktop app
+- **決策**：React desktop app（Tauri）廢棄，改 terminal UI。GSAP 8 skills 已讀取（`~/gbrain/.claude/skills/`），作為 TUI 前端動畫參考。
+- **為什麼**：React desktop 太重、debug 太多（WebSocket race, 前端狀態機, Tauri build 問題）。TUI 更輕量、更符合 CLI 辦公室定位。
+- **否決**：否決「繼續修 React app」。引擎核心才是護城河，UI 先求有再求美。
+- **可推翻條件**：TUI prototype 證明無法滿足基本交互需求時，可重回 web UI 評估。

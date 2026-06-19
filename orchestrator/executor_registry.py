@@ -37,13 +37,20 @@ def _load_settings_overrides() -> dict[str, dict[str, Any]]:
 
 
 def _init():
-    """Merge built-in defaults with settings.json overrides."""
+    """Merge built-in defaults with settings.json overrides, then register custom executors."""
     overrides = _load_settings_overrides()
     for name, builtin in _BUILTIN_EXECUTORS.items():
         entry = builtin.copy()
         if name in overrides:
             entry.update(overrides[name])
         _registry[name] = entry
+    # Also register custom executors from settings.json that aren't built-in
+    # (e.g. web-llm-genspark, web-llm-gemini)
+    for name, defn in overrides.items():
+        if name not in _BUILTIN_EXECUTORS:
+            entry = dict(defn)
+            entry.setdefault("name", name)
+            _registry[name] = entry
 
 
 def register(defn: dict[str, Any]) -> None:
@@ -72,7 +79,7 @@ def run(name: str, prompt: str, *, timeout: int | None = None,
         raise KeyError(f"Executor '{name}' not registered")
 
     binary = defn.get("binary", "")
-    if not binary:
+    if not binary and defn.get("type") != "super-engine-warm":
         raise ValueError(f"Executor '{name}' has no 'binary' field")
 
     bin_path = shutil.which(binary) or binary

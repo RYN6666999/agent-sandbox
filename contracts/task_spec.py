@@ -10,7 +10,7 @@ class TaskSpec(BaseModel):
     # stop conditions (set during align phase)
     stop_on_metric: str = ""
     max_rounds: int = 5
-    executor: str = "litellm"   # "litellm" | "claude-code"
+    executor: str = "litellm"   # "litellm" | "claude-code" | "web-llm-genspark" | "web-llm-gemini"
 
     @field_validator("why")
     @classmethod

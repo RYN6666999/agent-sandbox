@@ -1,28 +1,37 @@
-"""Maker: produces output from TaskSpec. Uses router to pick model + skills."""
+"""Maker: produces output from TaskSpec. Routes through executor_registry
+with a litellm fallback for the default path.
+
+In the new architecture, Scream is Planner+Maker:
+  1. Scream plans → POST /task/make (this function)
+  2. AgentOS routes through executor_registry or calls litellm
+  3. Returns output → Scream decides next step (verify / retry / deliver)
+
+No internal loop/retry logic — Scream controls iteration externally.
+"""
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Callable
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
 load_dotenv()
 
 import litellm
-import requests
 from contracts.task_spec import TaskSpec
+from orchestrator import executor_registry
+from orchestrator import decision_log
+from orchestrator.model_registry import resolve as _resolve
 from router import route
 from router.skill_injector import build_system_prompt
-from orchestrator.model_registry import resolve as _resolve
-from orchestrator import executor_registry
 
-BASE_PROMPT = (
+SETTINGS_PATH = Path(__file__).parent.parent / "data" / "settings.json"
+
+_BASE_PROMPT = (
     "You are a focused implementer. Produce exactly what is asked. "
     "No extra commentary unless the task requires it."
 )
-
-SETTINGS_PATH = Path(__file__).parent.parent / "data" / "settings.json"
 
 
 def _load_settings() -> dict:
@@ -34,188 +43,98 @@ def _load_settings() -> dict:
     return {}
 
 
-def _call_mcp_tool(server_url: str, tool_name: str, args: dict) -> str:
-    """Call an MCP tool via JSON-RPC 2.0."""
-    try:
-        resp = requests.post(
-            server_url,
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                  "params": {"name": tool_name, "arguments": args}},
-            timeout=15,
-        )
-        data = resp.json()
-        result = data.get("result", {})
-        # MCP returns content array
-        content = result.get("content", [])
-        if isinstance(content, list):
-            return "\n".join(
-                c.get("text", "") for c in content if c.get("type") == "text"
-            )
-        return str(result)
-    except Exception as e:
-        return f"[MCP error: {e}]"
-
-
-def _list_mcp_tools(server_url: str) -> list[dict]:
-    """List tools from an MCP server (JSON-RPC tools/list)."""
-    try:
-        resp = requests.post(
-            server_url,
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
-            timeout=10,
-        )
-        data = resp.json()
-        return data.get("result", {}).get("tools", [])
-    except Exception:
-        return []
-
-
-def _mcp_tools_to_litellm(tools: list[dict]) -> list[dict]:
-    """Convert MCP tool defs to LiteLLM function-calling format."""
-    out = []
-    for t in tools:
-        schema = t.get("inputSchema", {})
-        out.append({
-            "type": "function",
-            "function": {
-                "name": t["name"],
-                "description": t.get("description", ""),
-                "parameters": schema,
-            },
-        })
-    return out
-
-
-def make(spec: TaskSpec, feedback: str = "", round_n: int = 1,
-         on_token: "Callable[[str], None] | None" = None,
+def make(spec: TaskSpec, *, on_token: Callable[[str], None] | None = None,
          request_id: str | None = None,
          session_id: str | None = None) -> str:
-    """Call the routed model and return raw output string."""
-    if spec.executor == "claude-code":
-        prompt_parts = [f"Task: {spec.why}"]
-        if spec.taste:
-            prompt_parts.append(f"Requirements: {'; '.join(spec.taste)}")
-        if spec.boundaries:
-            prompt_parts.append(f"Do NOT: {'; '.join(spec.boundaries)}")
-        if feedback and round_n > 1:
-            prompt_parts.append(f"\nPrevious attempt feedback (round {round_n}):\n{feedback}")
-        prompt = "\n".join(prompt_parts)
-        return executor_registry.run("claude-code", prompt, timeout=300, on_token=on_token)
+    """One-shot LLM call. Routes through executor_registry for non-litellm executors."""
+    executor = spec.executor or "litellm"
 
+    # Route registered executors through executor_registry
+    if executor != "litellm" and executor_registry.get(executor):
+        prompt = _build_prompt(spec, executor)
+        _record_maker_event(request_id, session_id, executor, spec.why[:200])
+        return executor_registry.run(executor, prompt, timeout=300, on_token=on_token)
+
+    # Default litellm path
+    _record_maker_event(request_id, session_id, "litellm", spec.why[:200])
+    return _call_litellm(spec, on_token=on_token, request_id=request_id, session_id=session_id)
+
+
+def _build_prompt(spec: TaskSpec, executor: str = "litellm") -> str:
+    """Build prompt string for non-litellm executors."""
+    parts = [f"Task: {spec.why}"]
+    if spec.io_example.get("expected_output"):
+        parts.append(f"Expected output: {spec.io_example['expected_output']}")
+    if spec.taste:
+        parts.append(f"Requirements: {'; '.join(spec.taste)}")
+    if spec.boundaries:
+        parts.append(f"Do NOT: {'; '.join(spec.boundaries)}")
+    return "\n".join(parts)
+
+
+def _call_litellm(spec: TaskSpec, *,
+                  on_token: Callable[[str], None] | None = None,
+                  request_id: str | None = None,
+                  session_id: str | None = None) -> str:
+    """Call litellm with routing, skill injection, and streaming support."""
     settings = _load_settings()
+    maker_model_alias = settings.get("maker_model", "")
 
-    policy_result = route(spec.why, request_id=request_id, session_id=session_id, round_n=round_n)
+    # Route through routing pipeline
+    policy_result = route(spec.why, request_id=request_id, session_id=session_id, round_n=1)
     triple = policy_result.triple
+    model_alias = maker_model_alias or triple.model
 
-    # D17/D15 fix: settings["maker_model"] overrides mapping-table hardcode.
-    # triple still provides skills and mcp_tools; only model is overridden.
-    maker_model_alias = settings.get("maker_model") or triple.model
-
-    # Build system prompt — inject user system_prompt if set
-    base = BASE_PROMPT
+    base = _BASE_PROMPT
     user_sys = settings.get("system_prompt", "").strip()
     if user_sys:
-        base = f"{BASE_PROMPT}\n\n{user_sys}"
+        base = f"{_BASE_PROMPT}\n\n{user_sys}"
 
-    system = build_system_prompt(triple.skills, maker_model_alias, base)
-    user_msg = _build_user_msg(spec, feedback, round_n)
+    system = build_system_prompt(triple.skills, model_alias, base)
+    messages = [{"role": "system", "content": system},
+                {"role": "user", "content": _build_prompt(spec, "litellm")}]
 
-    params = _resolve(maker_model_alias)
+    params = _resolve(model_alias)
     max_tokens = settings.get("max_tokens", 2048)
     temperature = settings.get("temperature", None)
     if temperature is not None:
         params["temperature"] = temperature
 
-    # Collect enabled MCP servers and their tools
-    mcp_servers = [s for s in settings.get("mcp_servers", []) if s.get("enabled")]
-    all_tools: list[dict] = []
-    tool_server_map: dict[str, str] = {}  # tool_name → server_url
-
-    for srv in mcp_servers:
-        url = srv.get("url", "")
-        if not url:
-            continue
-        tools = _list_mcp_tools(url)
-        litellm_tools = _mcp_tools_to_litellm(tools)
-        for t in litellm_tools:
-            tool_name = t["function"]["name"]
-            tool_server_map[tool_name] = url
-        all_tools.extend(litellm_tools)
-
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user_msg},
-    ]
-
-    # Agentic tool-calling loop (max 5 rounds to prevent infinite)
-    for _ in range(5):
-        call_kwargs: dict = dict(messages=messages, max_tokens=max_tokens, **params)
-        if all_tools:
-            call_kwargs["tools"] = all_tools
-            call_kwargs["tool_choice"] = "auto"
-
-        if on_token is not None and not all_tools:
-            # Streaming only when no tools (tool calls need full response)
-            chunks: list[str] = []
-            try:
-                stream = litellm.completion(stream=True, **call_kwargs)
-                for chunk in stream:
-                    delta = chunk.choices[0].delta.content or ""
-                    if delta:
-                        chunks.append(delta)
-                        on_token(delta)
+    if on_token:
+        chunks: list[str] = []
+        try:
+            stream = litellm.completion(stream=True, messages=messages,
+                                        max_tokens=max_tokens, **params)
+            for chunk in stream:
+                delta = chunk.choices[0].delta.content or ""
+                if delta:
+                    chunks.append(delta)
+                    on_token(delta)
+            return "".join(chunks)
+        except Exception:
+            if chunks:
                 return "".join(chunks)
-            except Exception:
-                if chunks:
-                    return "".join(chunks)
-                raise
+            raise
 
-        response = litellm.completion(**call_kwargs)
-        msg = response.choices[0].message
-        finish_reason = response.choices[0].finish_reason
-
-        if finish_reason != "tool_calls" or not getattr(msg, "tool_calls", None):
-            text = msg.content or ""
-            if on_token and text:
-                on_token(text)
-            return text
-
-        # Execute tool calls and add results to messages
-        messages.append(msg.model_dump() if hasattr(msg, "model_dump") else {
-            "role": "assistant",
-            "content": msg.content,
-            "tool_calls": [tc.model_dump() for tc in msg.tool_calls],
-        })
-
-        for tc in msg.tool_calls:
-            fn = tc.function
-            try:
-                args = json.loads(fn.arguments)
-            except Exception:
-                args = {}
-            server_url = tool_server_map.get(fn.name, "")
-            result = _call_mcp_tool(server_url, fn.name, args) if server_url else f"[no server for {fn.name}]"
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": result,
-            })
-
-    # Fallback: one more call without tools
     response = litellm.completion(messages=messages, max_tokens=max_tokens, **params)
     return response.choices[0].message.content or ""
 
 
-def _build_user_msg(spec: TaskSpec, feedback: str, round_n: int) -> str:
-    parts = [
-        f"Task: {spec.why}",
-        f"Input: {spec.io_example.get('input', '')}",
-        f"Expected output shape: {spec.io_example.get('expected_output', '')}",
-    ]
-    if spec.taste:
-        parts.append(f"Quality signals: {'; '.join(spec.taste)}")
-    if spec.boundaries:
-        parts.append(f"Red lines: {'; '.join(spec.boundaries)}")
-    if feedback and round_n > 1:
-        parts.append(f"\n[Round {round_n} — Checker feedback]\n{feedback}")
-    return "\n".join(parts)
+def _record_maker_event(request_id: str | None, session_id: str | None,
+                        executor: str, task_preview: str) -> None:
+    if not request_id:
+        return
+    decision_log.record_execution_route(
+        request_id=request_id,
+        session_id=session_id or request_id,
+        round_n=1,
+        decision=f"maker_{executor}",
+        decision_source="maker",
+        matched_keyword=None, confidence=None,
+        classifier_model=None, fallback_reason=None,
+        pre_policy_model=None, pre_policy_skills=None, pre_policy_tools=None,
+        final_model=executor, final_skills=None, final_tools=None,
+        policy_applied=False, policy_changed=False,
+        requires_human_confirm=False, violations=None,
+        details={"executor": executor, "task_preview": task_preview},
+    )

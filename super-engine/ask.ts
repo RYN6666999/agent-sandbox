@@ -13,7 +13,10 @@
 import { chromium, type Page } from "playwright";
 import { PROVIDERS, type ProviderConfig } from "./config.js";
 import { parseArgs } from "node:util";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BRAVE_PATH = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
 
 interface Args {

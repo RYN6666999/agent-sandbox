@@ -18,11 +18,12 @@ from pydantic import BaseModel, field_validator
 
 from contracts.task_spec import TaskSpec
 from align.core import parse_answers_to_spec, synthesize_task_brief, ALIGN_QUESTIONS
-from orchestrator.loop import run as run_loop
+from orchestrator.loop import run_verification
 from orchestrator.maker import make as run_maker
+from orchestrator.checker import check as run_checker
 from orchestrator import decision_log
 
-app = FastAPI()
+app = FastAPI(redirect_slashes=False)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # In-memory session store (single-user desktop app, no persistence needed)
@@ -592,31 +593,14 @@ async def approve_task(req: ApproveRequest):
 
 
 async def _run_and_push(session_id: str, spec: TaskSpec):
-    await push(session_id, "status", {"msg": "Maker/Checker loop started", "status": "running"})
-
-    loop = asyncio.get_event_loop()
+    """Legacy: verify once and push result via WebSocket."""
+    await push(session_id, "status", {"msg": "Verification started", "status": "running"})
     request_id = _request_id_for(session_id)
-
-    def on_token(token: str):
-        asyncio.run_coroutine_threadsafe(
-            push(session_id, "token", {"text": token}), loop
-        )
-
-    maker_model = _load_settings().get("maker_model", "unknown")
-
-    def on_round_start(round_n: int):
-        asyncio.run_coroutine_threadsafe(
-            push(session_id, "round_start", {"round": round_n, "model": maker_model}), loop
-        )
 
     try:
         result = await asyncio.to_thread(
-            run_loop,
-            spec,
-            on_token=on_token,
-            on_round_start=on_round_start,
-            request_id=request_id,
-            session_id=session_id,
+            run_verification, spec, "",
+            prev_score=None, max_rounds=spec.max_rounds,
         )
         sessions[session_id]["result"] = result
         sessions[session_id]["status"] = result["status"]
@@ -674,7 +658,53 @@ def list_executors():
     return {"executors": executor_registry.list_all()}
 
 
-# ── synchronous task execution (for Scream curl client) ────────────────────
+# ── knowledge base (腦庫) HTTP API ──────────────────────────────────────────
+
+
+class KnowledgeWriteRequest(BaseModel):
+    content: str
+    metadata: dict = {}
+
+
+@app.post("/knowledge")
+def knowledge_write(key: str, req: KnowledgeWriteRequest):
+    """Write a knowledge entry."""
+    from orchestrator.knowledge import write_knowledge, ensure_schema
+    ensure_schema()
+    entry_id = write_knowledge(key, req.content, metadata=req.metadata)
+    return {"ok": True, "entry_id": entry_id}
+
+
+@app.get("/knowledge/search")
+def knowledge_search(q: str, limit: int = 10):
+    """Full-text search across knowledge entries."""
+    from orchestrator.knowledge import search_knowledge, ensure_schema
+    ensure_schema()
+    entries = search_knowledge(q, limit=limit)
+    return {"entries": entries}
+
+
+@app.get("/knowledge/id/{entry_id}")
+def knowledge_get(entry_id: str):
+    """Get a single knowledge entry by its ID."""
+    from orchestrator.knowledge import get_knowledge, ensure_schema
+    ensure_schema()
+    entry = get_knowledge(entry_id)
+    if entry is None:
+        raise HTTPException(404, f"no knowledge entry with id '{entry_id}'")
+    return entry
+
+
+@app.get("/knowledge/{key:path}")
+def knowledge_read(key: str, limit: int = 20):
+    """Read knowledge entries by key prefix."""
+    from orchestrator.knowledge import read_knowledge, ensure_schema
+    ensure_schema()
+    entries = read_knowledge(key, limit=limit)
+    return {"entries": entries}
+
+
+# ── synchronous task execution ─────────────────────────────────────────────
 
 
 class TaskRunRequest(BaseModel):
@@ -692,42 +722,101 @@ class TaskRunRequest(BaseModel):
 class TaskRunResponse(BaseModel):
     status: str
     output: str = ""
-    rounds: int = 0
-    final_score: float | None = None
     error: str = ""
+
+
+# ── /task/make (new — Scream → AgentOS maker) ────────────────────────────────
+
+
+class MakeRequest(BaseModel):
+    why: str
+    executor: str = "litellm"
+
+
+class MakeResponse(BaseModel):
+    output: str = ""
+    error: str = ""
+
+
+@app.post("/task/make")
+async def task_make(req: MakeRequest):
+    """One-shot maker call. Scream sends a brief, gets output back."""
+    from orchestrator.safety import is_dangerous
+    dangerous, triggers = is_dangerous(req.why)
+    if dangerous:
+        return MakeResponse(error=f"Dangerous task blocked: {', '.join(triggers)}")
+
+    spec = TaskSpec(
+        why=req.why,
+        io_example={"input": req.why, "expected_output": "working output"},
+        taste=[], boundaries=[], stop_on_metric="quality", max_rounds=1,
+    )
+    if req.executor != "litellm":
+        spec = spec.model_copy(update={"executor": req.executor})
+
+    try:
+        output = await asyncio.to_thread(run_maker, spec)
+        return MakeResponse(output=output)
+    except Exception as e:
+        return MakeResponse(error=str(e))
+
+
+# ── /task/verify (new — AgentOS → Claude CLI checker) ────────────────────────
+
+
+class VerifyRequest(BaseModel):
+    why: str
+    output: str
+    prev_score: float | None = None
+    max_rounds: int = 5
+
+
+@app.post("/task/verify")
+async def task_verify(req: VerifyRequest):
+    """Single verification cycle: check → decide (pass/retry/escalate)."""
+    spec = TaskSpec(
+        why=req.why,
+        io_example={"input": req.why, "expected_output": ""},
+        taste=[], boundaries=[], stop_on_metric="quality", max_rounds=req.max_rounds,
+    )
+    try:
+        result = await asyncio.to_thread(
+            run_verification, spec, req.output,
+            prev_score=req.prev_score, max_rounds=req.max_rounds,
+        )
+        return result
+    except Exception as e:
+        return {"status": "escalate", "score": 0.0, "feedback": str(e),
+                "passed": False, "source": "error"}
+
+
+# ── /task/run (legacy, kept for backward compatibility) ──────────────────────
 
 
 @app.post("/task/run", response_model=TaskRunResponse)
 async def task_run(req: TaskRunRequest):
-    """Synchronous task execution. Runs full Maker/Checker loop, returns result."""
-    TASK_RUN_TIMEOUT = 300  # seconds
-
-    # Safety gate
+    """Legacy: synchronous maker call. Returns output or error."""
+    TASK_RUN_TIMEOUT = 300
     from orchestrator.safety import is_dangerous
     dangerous, triggers = is_dangerous(req.task)
     if dangerous:
-        return TaskRunResponse(
-            status="blocked",
-            error=f"Dangerous command blocked: {', '.join(triggers)}",
-        )
+        return TaskRunResponse(status="blocked",
+                               error=f"Dangerous command blocked: {', '.join(triggers)}")
 
-    # Build spec
-    spec = _make_loop_spec(req.task)
+    spec = TaskSpec(
+        why=req.task,
+        io_example={"input": req.task, "expected_output": "working output"},
+        taste=[], boundaries=[], stop_on_metric="quality", max_rounds=1,
+    )
     if req.executor == "claude-code":
         spec = spec.model_copy(update={"executor": "claude-code"})
 
-    # Run loop (sync blocking call in thread pool)
     try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(run_loop, spec),
+        output = await asyncio.wait_for(
+            asyncio.to_thread(run_maker, spec),
             timeout=TASK_RUN_TIMEOUT,
         )
-        return TaskRunResponse(
-            status=result.get("status", "error"),
-            output=result.get("output", ""),
-            rounds=result.get("rounds", 0),
-            final_score=result.get("final_score"),
-        )
+        return TaskRunResponse(status="done", output=output)
     except asyncio.TimeoutError:
         return TaskRunResponse(status="timeout", error=f"Task exceeded {TASK_RUN_TIMEOUT}s timeout")
     except Exception as e:

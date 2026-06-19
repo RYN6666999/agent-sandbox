@@ -117,8 +117,10 @@ Postgres、Redis、Docker、雲端服務（資料隱私 + 降複雜度）。
 - `orchestrator/model_registry.py` — alias → LiteLLM kwargs（3 tier：alias / openrouter/ / raw）
 - `orchestrator/executor_registry.py` — registry 核心（register/get/list/run，三種 type）
 - `orchestrator/blackboard.py` — .sdd/ 檔案系統黑板
+- `orchestrator/knowledge.py` — **腦庫 SQLite 儲存層**（write/read/search/get_knowledge，FTS5）
+- `protocols/` — **協議模板庫**（8 份 agent 交互提示詞模板：handoff-opus / delegate-claude-code / delegate-subagent / record-session / review-request / task-breakdown / progress-report / write-protocol）
 - `align/core.py` — align 階段產出可派工 task brief
-- `api/main.py` — /chat / /converse / /task/run / /blackboard / /executors 端點
+- `api/main.py` — /chat / /converse / /task/run / /blackboard / /executors / /knowledge 端點
 - `router/classifier.py` — routing_intent()：3向分類（answer/code/unclear）
 - `router/` — 模型/技能路由
 - `contracts/` — TaskSpec 規格定義（含 executor 欄位）
@@ -128,10 +130,9 @@ Postgres、Redis、Docker、雲端服務（資料隱私 + 降複雜度）。
 - `super-engine/config.js` — Provider 設定（genspark, gemini 兩條線路）
 - `super-engine/setup-profile.ts` — Brave profile 一次性設定（指紋登入）
 - `super-engine/brave-profile/` — 🔑 已登入的 Brave profile
-- `scripts/agentos.sh` — Scream → AgentOS shell client
+- `scripts/agentos.sh` — Scream → AgentOS shell client（含 knowledge + protocol 指令）
 - `scripts/login-genspark.sh` — GenSpark 登入 helper
-- `ui/src/store.ts` — 前端狀態機（Zustand）
-- `ui/src/api.ts` — 前端 → 後端 HTTP contract
+- `tests/test_knowledge.py` — 腦庫 19 項測試（CRUD + FTS + metadata round-trip + slashes-in-key）
 
 ---
 
@@ -147,10 +148,13 @@ Plan 階段必須固定以下三種停損，不可事後才補：
 ## 五、目前進度 (Status — 接手前必讀)
 
 已完成（git log 可查）：
+- [x] **角色重構 v2** — Scream 為 Planner+Maker、Claude CLI 為 Checker、AgentOS 為純 Action 回圈層、
+      Opus 為顧問、Gemini 為小雜工；maker.py / checker.py / loop.py 全面重構，
+      新增 POST /task/make 和 POST /task/verify 端點
 - [x] **審計日誌** decision_log：兩表、event_type 區分 intent_gate / execution_route、
       單 request_id 查完整決策鏈、寫入失敗不阻斷主流程。
 - [x] **Checker 真跑 pytest**：subprocess + timeout=60，過=10 / 敗=2 / 逾時=0，
-      非程式碼任務才 fallback LLM 評分（標記 LLM_SCORED）。假綠燈已修復。
+      非程式碼任務 deleg Claude CLI 評分。移除了 LLM 評分 fallback（舊 _llm_check / _llm_score）。
 - [x] **clarify gate**：模糊/過短輸入先反問一句。
 - [x] **safety gate**：規則攔截破壞性指令，只擋炸環境的、不擋業務刪除，已移到 clarify 之前。
 - [x] **/converse 閒聊 vs /chat 任務分流**：按鈕區分，/converse 改同步阻塞回傳
@@ -161,13 +165,29 @@ Plan 階段必須固定以下三種停損，不可事後才補：
       maker dead field 修復（見 D15）；model_registry 三 tier resolve（見 D13）。
 - [x] **executor registry** — register/get/list/run 四介面，支援 subprocess / super-engine / super-engine-warm 三種 type
 - [x] **Blackboard HTTP API** — GET/POST /blackboard 端點
-- [x] **/task/run 同步端點** — safety gate → loop → blocking 結果
-- [x] **scripts/agentos.sh** — shell client（run / blackboard / executors / health）
+- [x] **/task/run 同步端點** — safety gate → maker → blocking 結果
+- [x] **scripts/agentos.sh** — shell client（run / blackboard / executors / health / knowledge / protocol）
 - [x] **super-engine** — Playwright 驅動 Brave，兩條 provider 線路
       - GenSpark (Opus 4.8)：visible browser ~13-27s
       - Gemini 免費版：daemon warm 模式 **2.3s** 🔥
 - [x] **keep-warm daemon** — ask-daemon.ts HTTP server（port 3456），瀏覽器常駐零啟動
-- [x] **測試覆蓋**：170+ tests（pytest），涵蓋 API、registry、super-engine、safety、blackboard
+- [x] **腦庫 SQLite 整合** — `orchestrator/knowledge.py`（write/read/search/get_knowledge），
+      FTS5 全文搜尋，獨立 `data/knowledge.db`，HTTP 端點（POST/GET /knowledge），
+      shell client 支援（knowledge-write / knowledge-read / knowledge-search），19 項測試全過
+- [x] **協議模板庫** — `protocols/` 目錄，8 份 agent 交互提示詞模板（handoff-opus /
+      delegate-claude-code / delegate-subagent / record-session / review-request /
+      task-breakdown / progress-report / write-protocol），
+      shell client 支援（protocol list / show / push），可推送到腦庫
+- [x] **測試覆蓋**：188+ tests（pytest），涵蓋 API、registry、super-engine、safety、blackboard、knowledge
+
+待做（Backlog）：
+- [ ] maker 換強力 coding 模型（D17，需 Ryan 拍板模型字串）。
+- [ ] 用明確 brief 跑完整 Maker→Checker 循環，驗證核心假設（D9）。
+- [ ] frontend clarify_routing UI（後端已完成，前端 A/B 問答尚未實作）。
+- [ ] Agnes 多模態 MCP 接入（D18，roadmap 階段二）。
+- [ ] **AgentOS TUI** — 取代 React desktop app，用 terminal UI（參考 GASP skill 設計）
+- [ ] **GASP skill 研究** — https://github.com/Arvincreator/project-golem（Browser-in-the-Loop 架構參考）
+- [ ] super-engine headless 模式（GenSpark 安全偵測繞過）
 
 待做（Backlog）：
 - [ ] maker 換強力 coding 模型（D17，需 Ryan 拍板模型字串）。

@@ -105,7 +105,7 @@
 - **決策**：maker 應換成能真正寫程式的模型（DeepSeek V3 或 gpt-oss-120b），而非 8B 的 agnes。
 - **為什麼**：D15 修好接線後，問題浮現：欄位通了，但 maker 預設仍是 agnes。核心細胞驗證（D9）要求 Maker 真能寫出通過 pytest 的程式碼，agnes 能力不足。
 - **狀態**：Backlog。接線已修，換預設模型是下一步，需 Ryan 拍板模型字串。
-- **v3 更新**：此決策在 v3 角色重構後已不適用 — Scream 接手執行層，maker_model 不再為 AgentOS 的主要執行路徑。模型選擇由 Scream Code 環境決定，不再由 settings.json 的 maker_model 控制。
+- **v3 更新**：此決策在 v3 角色重構後改走雙路徑 — Scream 接手執行層，maker_model 不再為 AgentOS 的主要執行路徑。模型選擇由 Scream Code 環境決定，不再由 settings.json 的 maker_model 控制。
 
 ## D18. Agnes 定位：多模態工具接入層，非文字主力（v3 更新）
 - **原始決策**：Agnes 的正確用途是圖片/影片理解（多模態能力），掛在 MCP 工具層。不用於文字生成、推理、寫程式等主力任務。

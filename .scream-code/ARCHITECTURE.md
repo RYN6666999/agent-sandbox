@@ -12,7 +12,7 @@
 | **Planner + 執行者** | **Scream Code（我）** | 計劃任務、call LLM、寫 code、審閱產出、判斷交付、溝通 Opus | 活在 session 裡，不能常駐 server | Foxconn PM + 工程部自己焊板子 |
 | **Checker** | **Claude CLI** | 跑 pytest 驗收、程式碼審查、給 feedback — **不寫 code** | 用完即焚，無持久 session | QA 部門（不碰烙鐵） |
 | **Action (回圈層)** | **AgentOS** | safety gate、audit log、executor registry、checker proxy、腦庫、黑板 | 沒有智商，只有規則和設備 | NCC / 規章制度 |
-| **顧問** | **Opus 4.8 (GenSpark)** | 戰略判斷、架構審查、重大決策 | **不進產線**，只能透過 gbrain / super-engine 溝通 | 蘋果董事會 |
+| **顧問 / 可選執行層** | **Opus 4.8 (GenSpark)** | 戰略判斷、架構審查、重大決策、可選當執行層 | 需透過 super-engine 間接接入 | 蘋果董事會 |
 | **小雜工** | **Gemini (super-engine)** | 廉價任務：摘要、分類、提取、格式轉換 | 僅文字，無法多模態 | 工讀生（只打字） |
 | **多模態工具** | **Agnes (api)** | 看圖、產圖（agnes-image）、產影片（agnes-video）、廉價閒聊 | 文字品質不穩，不適合高風險任務 | 美編 + 總機 |
 
@@ -21,10 +21,10 @@
 | 項目 | v2 | v3 |
 |---|---|---|
 | Scream | Planner + Maker（寫 brief → AgentOS call LLM） | **計劃 + 執行**：自己 call LLM、寫 code、判斷交付 |
-| Opus | maker_model（web-llm-genspark 當執行層） | **顧問** — 不進產線，需要時才諮詢 |
-| AgentOS | Action 層（含 maker proxy / checker proxy） | **純 Action 回圈層**（零智力基礎設施，無 maker proxy） |
-| `/task/make` | 主要路徑（Scream → AgentOS → LLM） | **不存在或已降級** — Scream 直接執行 |
-| 「maker 換強力模型」 | backlog | **不適用** — Scream 自己 call LLM，模型由 Scream 環境決定 |
+| Opus | maker_model（web-llm-genspark 當執行層） | **可選執行層**（透過 super-engine 通路），或當顧問 |
+| AgentOS | Action 層（含 maker proxy / checker proxy） | **基礎設施層**（無 maker proxy，但保留 executor registry） |
+| `/task/make` | 主要路徑（Scream → AgentOS → LLM） | **雙路徑之一** — Scream 直接執行，或 POST /task/make 走 super-engine |
+| 「maker 換強力模型」 | backlog | **可走雙路徑** — 加強 Scream 環境或 super-engine 通路 |
 
 ---
 
@@ -77,7 +77,7 @@ Scream 也可透過 super-engine 通路直接諮詢 Opus（同步或半同步）
 
 ### 3.2 Scream → AgentOS（同步，HTTP API）
 
-v3 的 API 端點 — `/task/make` 已移除或降級，Scream 不再透過 AgentOS call LLM：
+v3 的 API 端點 — 雙執行路徑：Scream 直接執行 或 POST /task/make 走 super-engine：
 
 | 端點 | 用途 | 狀態 |
 |---|---|---|
@@ -88,7 +88,7 @@ v3 的 API 端點 — `/task/make` 已移除或降級，Scream 不再透過 Agen
 | `GET /knowledge/search` | 全文搜尋腦庫 | 保留 |
 | `GET \| POST /blackboard/{key}` | 讀寫黑板 | 保留 |
 | `GET /executors` | 列出 executor（Checker / super-engine） | 保留 |
-| ~~`POST /task/make`~~ | ~~Scream → AgentOS → call LLM~~ | **已移除** |
+| `POST /task/make` | Scream → AgentOS → super-engine executor（Opus / Gemini） | 可用（第二執行路徑） |
 
 ### 3.3 Scream → Gemini / Agnes（小雜工 + 多模態工具）
 
@@ -114,24 +114,23 @@ v3 的 API 端點 — `/task/make` 已移除或降級，Scream 不再透過 Agen
 ## 五、AgentOS 的最終邊界
 
 ```
-AgentOS 做的事情（純 Action 回圈層，零智力基礎設施）：
+AgentOS 做的事情（基礎設施層）：
 ├── safety gate（規則攔截）
 ├── clarify gate（模糊輸入反問）
-├── executor registry（派工：Checker / super-engine — 不含 maker）
+├── executor registry（派工：Checker / super-engine）
 ├── checker proxy（收產出 → spawn pytest / Claude CLI → 回傳 verdict）
 ├── decision_log（審計全程）
 ├── knowledge base（腦庫 SQLite + FTS5）
 ├── blackboard（短期狀態 .sdd/）
 └── protocol templates（協議提示詞庫）
 
-AgentOS 不再做的事（v2 → v3 移除）：
-├── ✗ maker proxy（不再收 TaskSpec → call LLM）—— Scream 自己執行
-├── ✗ loop 判斷（pass/retry/escalate）—— Scream 自己判斷
+AgentOS 不再做的事（v2 → v3 轉變）：
+├── ✗ 自動 loop 判斷（pass/retry/escalate）—— Scream 自己判斷
 
 AgentOS 不做的事（純粹 Scream 的職責）：
 ├── 任務規劃與拆解
 ├── 程式碼產出（Scream 自己 call LLM、寫 code）
-├── LLM 呼叫（Scream 使用 Scream Code 環境中的工具直接完成）
+├── LLM 呼叫（Scream 使用 Scream Code 環境中的工具直接完成，或可選 POST /task/make 走 super-engine）
 ├── 戰略判斷（往 Opus）
 ├── 交付判斷（pass → 交付 / 送審 Opus）
 ├── 跨 agent 溝通協調

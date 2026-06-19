@@ -1,7 +1,7 @@
 # AgentOS — 多角色產線作業系統
 
 > Scream 規劃與執行，Claude CLI 驗收，AgentOS 只做門禁與審計，
-> Opus 當顧問不進產線，Gemini 跑雜工 — 每個人做自己擅長的事。
+> Opus 當顧問（選用執行路徑），Gemini 跑雜工 — 每個人做自己擅長的事。
 
 不是程式碼產生器，也不是聊天工具箱。五種角色協作：
 **Scream（計劃+執行）**→ **Claude CLI（驗收）** 穿過 **AgentOS（安全閘道）**，

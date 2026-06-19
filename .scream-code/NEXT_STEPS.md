@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | **計劃 + 執行者** | **Scream Code** | 規劃、產出、判斷、跨角色溝通 | 活在 session 裡，不能常駐 server | Foxconn PM |
 | **Checker** | **Claude CLI** | 真跑 pytest、程式碼審查、客觀驗收 | 用完即焚，無 session | QA 部門 |
-| **Action (回圈層)** | **AgentOS** | safety gate、audit log、executor registry、腦庫 | 沒有智商，只有規則和設備 | NCC / 規章制度 |
+| **Action (回圈層)** | **AgentOS** | safety gate、audit log、executor registry、腦庫 | 沒有生成能力，只有規則和設備 | NCC / 規章制度 |
 | **顧問** | Opus 4.8 (GenSpark 網頁) | 最強戰略判斷、架構設計、品質把關 | 不能執行、只能透過 gbrain 溝通 | 蘋果董事會 |
 | **小雜工** | Gemini (super-engine) | 廉價小任務：分類、摘要、提取 | 品質不穩定，不適合高風險任務 | 工讀生 |
 
@@ -213,7 +213,7 @@ shell client 支援：
 
 ### Phase 4：角色重構 v3 ✅
 
-**目標**：Scream 從 Planner+Maker 升級為「計劃+執行」— 不再透過 AgentOS call LLM，而是自己直接執行。Opus 回歸顧問角色，不進產線。
+**目標**：Scream 從 Planner+Maker 升級為「計劃+執行」— 不再透過 AgentOS call LLM，而是自己直接執行。Opus 回歸顧問角色，選用執行路徑。
 
 **狀態：已完成**
 

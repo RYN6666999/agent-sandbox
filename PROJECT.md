@@ -37,12 +37,12 @@
 │   Claude CLI（僅驗收）                                    │
 │   └─ 不寫 code，只跑 pytest + 審查                        │
 │                                                         │
-│   AgentOS（純 Action 回圈層 — 零智力基礎設施）              │
+│   AgentOS（純 Action 回圈層 — 基礎設施層，不參與智力判斷）         │
 │   └─ safety gate / audit log / executor registry         │
 │      / 腦庫 / 黑板 / 協議模板庫                            │
 │                                                         │
 │   Opus 4.8（GenSpark）— 顧問                              │
-│   └─ 不進產線，需要時才諮詢                                │
+│   └─ 選用執行路徑，需要時才諮詢                            │
 │                                                         │
 │   Gemini（super-engine）— 小雜工（僅文字）                    │
 │   └─ 摘要、分類、格式轉換等廉價任務，不能看圖                  │
@@ -110,7 +110,7 @@
 - **Scream** 是執行主體，直接 call LLM、寫 code、判斷交付，不經 AgentOS maker proxy。
 - **AgentOS** 是 Scream 下方的基礎設施層，提供安全、審計、調度能力，但不參與智力判斷。
 - **Claude CLI** 是驗收角色，只在需要真實驗收時被 Scream 調用，不寫 code。
-- **Opus 4.8** 是顧問，非產線一環，Scream 遇到架構難題時才諮詢。
+- **Opus 4.8** 是顧問，選用執行路徑，Scream 遇到架構難題時才諮詢。
 - **Gemini（super-engine）** 是小雜工（僅文字），負責摘要、分類、格式轉換等廉價任務。
 - **Agnes** 是多模態工具（看圖、產圖、產影片），補 Gemini 的文字-only 缺口。目前作為 converse 閒聊預設模型。其 image/video 系列尚未整合為 executor。
 - **腦庫**是底層共用資源（記憶），所有 agent 透過統一介面讀寫，不直接碰資料庫。
@@ -140,8 +140,8 @@
 |------|----------|------|
 | Scream | `scream-code`（主 agent runtime） | 計劃 + 執行，自己 call LLM、寫 code |
 | Claude CLI | `claude`（subprocess） | 僅驗收，跑 pytest + 審查，不寫 code |
-| AgentOS | FastAPI + SQLite + executor registry | 基礎設施層，零智力 |
-| Opus 4.8 | GenSpark（super-engine line 1） | 顧問，不進產線 |
+| AgentOS | FastAPI + SQLite + executor registry | 基礎設施層，不參與智力判斷 |
+| Opus 4.8 | GenSpark（super-engine line 1） | 顧問，選用執行路徑 |
 | Gemini | super-engine daemon（line 2） | 小雜工，低延遲 2.3s |
 
 ### 禁用清單（MVP 階段）
@@ -189,8 +189,8 @@ Plan 階段必須固定以下三種停損，不可事後才補：
 已完成（git log 可查）：
 - [x] **角色重構 v3** — Scream 直接執行（自己 call LLM、寫 code、判斷交付）、
       Claude CLI 僅驗收（跑 pytest + 審查）、
-      AgentOS 為純 Action 回圈層（零智力基礎設施）、
-      Opus 4.8（GenSpark）為顧問（不進產線）、
+      AgentOS 為純 Action 回圈層（基礎設施層，不參與智力判斷）、
+      Opus 4.8（GenSpark）為顧問（選用執行路徑）、
       Gemini（super-engine）為小雜工（摘要/分類/格式轉換）
 - [x] **審計日誌** decision_log：兩表、event_type 區分 intent_gate / execution_route、
       單 request_id 查完整決策鏈、寫入失敗不阻斷主流程。

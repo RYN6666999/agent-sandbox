@@ -224,7 +224,7 @@ shell client 支援：
 | `.scream-code/ARCHITECTURE.md` | **全面更新** — v3 角色表、移除 maker proxy、協作圖改為 Scream 直接執行 |
 | `README.md` | **更新** — v3 描述、狀態、技術棧 |
 | `DECISIONS.md` | **新增 D23** — v3 角色重新定位 |
-| `data/settings.json` | **maker_model 降級** — Opus 回顧問，不當執行層 |
+| `data/settings.json` | **maker_model 非主要路徑但保留可用** — Opus 回顧問，不當執行層 |
 
 ### Phase 4：Scream 端的 client ✅
 

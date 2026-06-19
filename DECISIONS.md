@@ -159,8 +159,8 @@
 - **可推翻條件**：TUI prototype 證明無法滿足基本交互需求時，可重回 web UI 評估。
 
 ## D23. v3 角色重新定位：Scream = 計劃 + 執行，Opus 非 maker
-- **決策**：Scream Code 從「Planner + Maker（寫 brief → AgentOS call LLM）」改為「計劃 + 執行（自己 call LLM、寫 code、判斷交付）」。AgentOS 移除 maker proxy 角色，退為純基礎設施（safety gate / audit log / registry / 腦庫）。Opus 4.8（GenSpark）不再是 maker_model，回歸顧問角色，不進產線。
+- **決策**：Scream Code 從「Planner + Maker（寫 brief → AgentOS call LLM）」改為「計劃 + 執行（自己 call LLM、寫 code、判斷交付）」。AgentOS 移除 maker proxy 角色，退為純基礎設施（safety gate / audit log / registry / 腦庫）。Opus 4.8（GenSpark）不再是 maker_model，回歸顧問角色，採選用執行路徑。
 - **為什麼**：v2 架構中 Scream 只寫 brief，實際執行依賴 AgentOS 調用 LLM，而 AgentOS 的 maker_model 指向 GenSpark（Opus 4.8），導致（1）Opus 被當成執行層而非顧問，（2）Scream 的執行能力被低估。v3 讓 Scream 直接執行，AgentOS 回歸基礎設施本職，角色分工更清晰。
-- **否決 / 邊界**：否決「繼續讓 AgentOS 當 maker proxy」— 零智力基礎設施不該有執行職責。否決「Opus 當 maker_model」— 顧問不進產線。
-- **影響範圍**：PROJECT.md / ARCHITECTURE.md / README.md 核心敘事全面更新；data/settings.json 的 maker_model 欄位降級為參考用途；maker.py / loop.py 的程式碼保留不動，僅更新註解。
+- **否決 / 邊界**：否決「繼續讓 AgentOS 當 maker proxy」— 基礎設施不該有執行職責。否決「Opus 當 maker_model」— 顧問採選用執行路徑。
+- **影響範圍**：PROJECT.md / ARCHITECTURE.md / README.md 核心敘事全面更新；data/settings.json 的 maker_model 欄位改為非主要路徑但保留可用，作為參考用途；maker.py / loop.py 的程式碼保留不動，僅更新註解。
 - **可推翻條件**：若 Scream Code 環境無法勝任執行角色，可重回 AgentOS maker proxy 模式，但屆時 maker_model 不應指向顧問角色。

@@ -70,7 +70,7 @@ class DeliverRequest(BaseModel):
 
 class SettingsPayload(BaseModel):
     plan_model: str = "openrouter-classifier"    # D16: classifier / routing intent
-    maker_model: str = "gpt-oss-120b"             # D17: strong coding model via OpenRouter
+    maker_model: str = "gpt-oss-120b"             # v3: 僅供 AgentOS 基礎設施相容，非主要執行路徑（Scream 為執行層）
     converse_model: str = "agnes"                 # fast model for /converse chat path
     checker_model: str = "gemini-flash"          # LLM path only; pytest path uses no model
     checker_fallbacks: list[str] = ["agnes"]

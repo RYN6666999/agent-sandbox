@@ -1,12 +1,14 @@
 """
-Loop: single verification cycle. No more automated Maker/Checker loop.
+Loop: single verification cycle. v3 角色映射。
 
-In the new architecture, Scream drives the iteration externally:
-  1. Scream plans → POST /task/make → gets output
-  2. Scream POST /task/verify → gets verdict (pass/retry/escalate)
-  3. Scream decides next step based on verdict
+v3 角色定位：
+  Scream = 計劃 + 執行 — 自己 call LLM、寫 code、判斷交付，不經 AgentOS maker proxy
+  Claude CLI = 驗收 (Checker only) — 不寫 code，只跑 pytest + 審查
+  AgentOS = 純 Action 回圈層（零智力基礎設施）
+  Opus 4.8 (GenSpark) = 顧問 — 不是 maker，不進產線
+  Gemini (super-engine) = 小雜工
 
-This file now provides `run_verification()` — a single check + decide cycle.
+This file is the AgentOS-level verification action: a single check + decide cycle.
 """
 import sys
 from pathlib import Path

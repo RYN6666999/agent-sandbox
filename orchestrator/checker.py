@@ -1,7 +1,7 @@
 """
-Checker: validates Maker output against TaskSpec stop conditions.
+Checker: validates Scream output against TaskSpec stop conditions.
 
-In the new architecture, Claude CLI is the Checker. AgentOS wraps it:
+In the v3 architecture, Claude CLI is the Checker. AgentOS wraps it:
 
 Check pipeline:
   1. Detect if output is Python code with embedded tests

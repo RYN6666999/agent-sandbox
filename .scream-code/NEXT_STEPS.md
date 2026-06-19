@@ -10,7 +10,7 @@
 
 | 角色 | 誰 | 優勢 | 限制 | 比喻 |
 |---|---|---|---|---|
-| **Planner + Maker** | **Scream Code** | 規劃、產出、判斷、跨角色溝通 | 活在 session 裡，不能常駐 server | Foxconn PM |
+| **計劃 + 執行者** | **Scream Code** | 規劃、產出、判斷、跨角色溝通 | 活在 session 裡，不能常駐 server | Foxconn PM |
 | **Checker** | **Claude CLI** | 真跑 pytest、程式碼審查、客觀驗收 | 用完即焚，無 session | QA 部門 |
 | **Action (回圈層)** | **AgentOS** | safety gate、audit log、executor registry、腦庫 | 沒有智商，只有規則和設備 | NCC / 規章制度 |
 | **顧問** | Opus 4.8 (GenSpark 網頁) | 最強戰略判斷、架構設計、品質把關 | 不能執行、只能透過 gbrain 溝通 | 蘋果董事會 |
@@ -21,7 +21,7 @@
 | 模式 | 工具 | 通訊方向 | 延遲 | 適合場景 |
 |---|---|---|---|---|
 | Async 戰略 | gbrain (Postgres + R2) | Opus ↔ Scream | 分鐘～小時 | 戰略方向、重大決策 |
-| Sync 戰術 | super-engine (Playwright) | Scream → 網頁 LLM | 5～22 秒 | 即時判斷、戰術問題 |
+| Sync 戰術 | Scream 直接執行 | Scream → 自行 call LLM + 寫 code | 即時 | Scream 自己完成，不再走網頁 LLM 繞路 |
 | Execution | AgentOS (subprocess) | Scream → Claude Code | 秒～分鐘 | 寫程式、跑測試 |
 
 ---
@@ -211,22 +211,20 @@ shell client 支援：
 ./agentos.sh protocol push <name>   # 推送到腦庫 (key: protocol/<name>)
 ```
 
-### Phase 4：角色重構 v2 ✅
+### Phase 4：角色重構 v3 ✅
 
-**目標**：重新定義五角色架構 — Scream (Planner+Maker)、Claude CLI (Checker)、AgentOS (Action 回圈層)、Opus (顧問)、Gemini (小雜工)。
+**目標**：Scream 從 Planner+Maker 升級為「計劃+執行」— 不再透過 AgentOS call LLM，而是自己直接執行。Opus 回歸顧問角色，不進產線。
 
 **狀態：已完成**
 
 核心變更：
 | 檔案 | 變更 |
 |---|---|
-| `orchestrator/maker.py` | **簡化** — 收 TaskSpec → 查 registry → call LLM → 回傳。移除 MCP tool 細節 |
-| `orchestrator/checker.py` | **改寫** — 移除 LLM 評分 fallback（_llm_check / _llm_score / litellm import），純 pytest + Claude CLI |
-| `orchestrator/loop.py` | **改造** — 不再有 LangGraph 自動循環，改為 `run_verification()` 單次驗證函式 |
-| `api/main.py` | **新增** `/task/make`（maker 端點）和 `/task/verify`（checker 端點）|
-| `.scream-code/ARCHITECTURE.md` | **全面更新** — 新角色圖、新協作流程、AgentOS 最終邊界 |
-| `protocols/delegate-claude-code.md` | **更新** — 從「通用 executor」改為「Checker 協議」|
-| `protocols/delegate-subagent.md` | **更新** — 雙路徑：高價值走 AgentOS、低價值直接 call |
+| `PROJECT.md` | **全面更新** — v3 五角色架構、移除 LangGraph、更新進度與路線圖 |
+| `.scream-code/ARCHITECTURE.md` | **全面更新** — v3 角色表、移除 maker proxy、協作圖改為 Scream 直接執行 |
+| `README.md` | **更新** — v3 描述、狀態、技術棧 |
+| `DECISIONS.md` | **新增 D23** — v3 角色重新定位 |
+| `data/settings.json` | **maker_model 降級** — Opus 回顧問，不當執行層 |
 
 ### Phase 4：Scream 端的 client ✅
 
@@ -247,7 +245,7 @@ curl -X POST http://localhost:8000/task/run \
 
 ---
 
-## 五、關鍵檔案地圖（v2 角色重構後）
+## 五、關鍵檔案地圖（v3 角色重構後）
 
 | 檔案 | 動作 |
 |---|---|
@@ -256,7 +254,8 @@ curl -X POST http://localhost:8000/task/run \
 | `orchestrator/loop.py` | **改造** — 無 LangGraph，改為 `run_verification()` 單次驗證 |
 | `api/main.py` | **新增** — `/task/make` 和 `/task/verify` 端點 |
 | `api/main.py` | **修改** — `/task/run` 簡化為單次 maker call，保留相容 |
-| `.scream-code/ARCHITECTURE.md` | **全面更新** — v2 五角色架構 |
+| `.scream-code/ARCHITECTURE.md` | **全面更新** — v3 五角色架構 |
+| `PROJECT.md` | **全面更新** — v3 角色、進度、路線圖 |
 | `protocols/delegate-claude-code.md` | **更新** — Checker 協議 |
 | `protocols/delegate-subagent.md` | **更新** — 雙路徑（AgentOS / 直接 call）|
 

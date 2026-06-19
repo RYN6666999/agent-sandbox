@@ -1,10 +1,14 @@
-"""Maker: produces output from TaskSpec. Routes through executor_registry
-with a litellm fallback for the default path.
+"""AgentOS action loop: routes a TaskSpec through the executor registry
+with a litellm fallback.
 
-In the new architecture, Scream is Planner+Maker:
-  1. Scream plans → POST /task/make (this function)
-  2. AgentOS routes through executor_registry or calls litellm
-  3. Returns output → Scream decides next step (verify / retry / deliver)
+v3 roles:
+  - Scream (Plan+Execute) — calls LLM directly, writes code, judges delivery.
+    Does NOT go through this AgentOS maker proxy.
+  - Claude CLI — Checker only. Runs pytest + review, never writes code.
+  - AgentOS — Pure action loop layer (zero-intelligence infrastructure).
+    This function is the "route to executor" action within that loop.
+  - Opus 4.8 (GenSpark) — Consultant, not a maker, not in the pipeline.
+  - Gemini (super-engine) — Small helper.
 
 No internal loop/retry logic — Scream controls iteration externally.
 """
@@ -46,7 +50,8 @@ def _load_settings() -> dict:
 def make(spec: TaskSpec, *, on_token: Callable[[str], None] | None = None,
          request_id: str | None = None,
          session_id: str | None = None) -> str:
-    """One-shot LLM call. Routes through executor_registry for non-litellm executors."""
+    """AgentOS route-to-executor action. Routes through executor_registry for non-litellm executors.
+        In v3, Scream calls LLM directly — this is AgentOS's own action loop routing, not a maker proxy."""
     executor = spec.executor or "litellm"
 
     # Route registered executors through executor_registry
@@ -55,9 +60,16 @@ def make(spec: TaskSpec, *, on_token: Callable[[str], None] | None = None,
         _record_maker_event(request_id, session_id, executor, spec.why[:200])
         return executor_registry.run(executor, prompt, timeout=300, on_token=on_token)
 
-    # Default litellm path
+    # Default litellm path — but maker_model from settings may be an executor
+    settings = _load_settings()
+    maker_model = settings.get("maker_model", "")
+    if maker_model and executor_registry.get(maker_model):
+        prompt = _build_prompt(spec, maker_model)
+        _record_maker_event(request_id, session_id, maker_model, spec.why[:200])
+        return executor_registry.run(maker_model, prompt, timeout=300, on_token=on_token)
+
     _record_maker_event(request_id, session_id, "litellm", spec.why[:200])
-    return _call_litellm(spec, on_token=on_token, request_id=request_id, session_id=session_id)
+    return _call_litellm(spec, settings=settings, on_token=on_token, request_id=request_id, session_id=session_id)
 
 
 def _build_prompt(spec: TaskSpec, executor: str = "litellm") -> str:
@@ -73,11 +85,12 @@ def _build_prompt(spec: TaskSpec, executor: str = "litellm") -> str:
 
 
 def _call_litellm(spec: TaskSpec, *,
+                  settings: dict | None = None,
                   on_token: Callable[[str], None] | None = None,
                   request_id: str | None = None,
                   session_id: str | None = None) -> str:
     """Call litellm with routing, skill injection, and streaming support."""
-    settings = _load_settings()
+    settings = settings if settings is not None else _load_settings()
     maker_model_alias = settings.get("maker_model", "")
 
     # Route through routing pipeline

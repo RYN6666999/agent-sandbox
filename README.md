@@ -1,10 +1,12 @@
-# AgentOS — CLI 辦公室
+# AgentOS — 多角色產線作業系統
 
-> agent 之間自己把任務做完、並客觀驗收的流水線 — AgentOS 不寫程式、不做決策，
-> 它只是辦公大樓：門禁、審計、驗收設備、排程協調。
+> Scream 規劃與執行，Claude CLI 驗收，AgentOS 只做門禁與審計，
+> Opus 當顧問不進產線，Gemini 跑雜工 — 每個人做自己擅長的事。
 
-不是程式碼產生器，也不是聊天工具箱。你丟出意圖，系統判斷 → 規劃 → 派工 →
-多 agent 協作 → 自動驗收收斂 → 交付可用成果。Maker/Checker 是最小協作細胞。
+不是程式碼產生器，也不是聊天工具箱。五種角色協作：
+**Scream（計劃+執行）**→ **Claude CLI（驗收）** 穿過 **AgentOS（安全閘道）**，
+**Opus（顧問）** 只在設計階段給建議，**Gemini（雜工）** 處理廉價任務。
+Maker/Checker 二元模型已升級為專業分工的產線架構。
 
 ## 四根支柱
 
@@ -15,7 +17,8 @@
 
 ## 技術棧
 
-FastAPI · LangGraph · LiteLLM · Pydantic · SQLite · MCP · Playwright  
+FastAPI · LiteLLM · Pydantic · SQLite · MCP · Playwright  
+（LangGraph 已棄用，改用 Scream 原生控制流程）  
 （MVP 階段不用 Postgres / Redis / Docker / 雲端）  
 （UI 評估中：React → TUI terminal UI）
 
@@ -58,4 +61,4 @@ pytest tests/
 
 ## 狀態
 
-MVP 開發中，核心 Maker → Checker 循環驗證階段。
+MVP 開發中，Scream 主導計劃與執行、Claude CLI 專責驗收、AgentOS 純 Action 回圈層已上線。

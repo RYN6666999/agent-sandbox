@@ -105,16 +105,18 @@
 - **決策**：maker 應換成能真正寫程式的模型（DeepSeek V3 或 gpt-oss-120b），而非 8B 的 agnes。
 - **為什麼**：D15 修好接線後，問題浮現：欄位通了，但 maker 預設仍是 agnes。核心細胞驗證（D9）要求 Maker 真能寫出通過 pytest 的程式碼，agnes 能力不足。
 - **狀態**：Backlog。接線已修，換預設模型是下一步，需 Ryan 拍板模型字串。
+- **v3 更新**：此決策在 v3 角色重構後已不適用 — Scream 接手執行層，maker_model 不再為 AgentOS 的主要執行路徑。模型選擇由 Scream Code 環境決定，不再由 settings.json 的 maker_model 控制。
 
 ## D18. Agnes 定位：多模態工具接入層，非文字主力
 - **決策**：Agnes 的正確用途是圖片/影片理解（多模態能力），掛在 MCP 工具層（roadmap 階段二）。不用於文字生成、推理、寫程式等主力任務。
 - **為什麼**：Agnes 是 8B SEA LLM，文字任務無法取代 Sonnet/DeepSeek 等中階模型（見 D6）。但它有多模態能力，做視覺 tool 是差異化用途，不是降級替代品。
 - **邊界**：階段二 MCP 工具層落地前不動 Agnes 接線。現在 agnes alias 保留作 checker_fallback（成本極低的 fallback 用途）。
+- **v3 更新**：Agnes 仍保留作 converse 預設模型與 checker_fallback。其多模態 MCP 接入留待階段二評估。
 
 ---
 
 ## 待決策（尚未拍板，留給後續）
-- maker 模型字串換成 DeepSeek V3 或 gpt-oss-120b（D17 後續行動，需 Ryan 拍板）。
+- ~~maker 模型字串換成 DeepSeek V3 或 gpt-oss-120b（D17 後續行動，需 Ryan 拍板）。~~ **（v3 已過時 — Scream 直接控制執行模型，此決策不再適用）**
 - align 階段 Plan 的輸出結構，以及多 agent 派工的拆解粒度。
 - 真沙箱隔離方案（目前 subprocess 跑同機 temp dir，有安全債，記 backlog）。
 
@@ -146,3 +148,10 @@
 - **為什麼**：React desktop 太重、debug 太多（WebSocket race, 前端狀態機, Tauri build 問題）。TUI 更輕量、更符合 CLI 辦公室定位。
 - **否決**：否決「繼續修 React app」。引擎核心才是護城河，UI 先求有再求美。
 - **可推翻條件**：TUI prototype 證明無法滿足基本交互需求時，可重回 web UI 評估。
+
+## D23. v3 角色重新定位：Scream = 計劃 + 執行，Opus 非 maker
+- **決策**：Scream Code 從「Planner + Maker（寫 brief → AgentOS call LLM）」改為「計劃 + 執行（自己 call LLM、寫 code、判斷交付）」。AgentOS 移除 maker proxy 角色，退為純基礎設施（safety gate / audit log / registry / 腦庫）。Opus 4.8（GenSpark）不再是 maker_model，回歸顧問角色，不進產線。
+- **為什麼**：v2 架構中 Scream 只寫 brief，實際執行依賴 AgentOS 調用 LLM，而 AgentOS 的 maker_model 指向 GenSpark（Opus 4.8），導致（1）Opus 被當成執行層而非顧問，（2）Scream 的執行能力被低估。v3 讓 Scream 直接執行，AgentOS 回歸基礎設施本職，角色分工更清晰。
+- **否決 / 邊界**：否決「繼續讓 AgentOS 當 maker proxy」— 零智力基礎設施不該有執行職責。否決「Opus 當 maker_model」— 顧問不進產線。
+- **影響範圍**：PROJECT.md / ARCHITECTURE.md / README.md 核心敘事全面更新；data/settings.json 的 maker_model 欄位降級為參考用途；maker.py / loop.py 的程式碼保留不動，僅更新註解。
+- **可推翻條件**：若 Scream Code 環境無法勝任執行角色，可重回 AgentOS maker proxy 模式，但屆時 maker_model 不應指向顧問角色。

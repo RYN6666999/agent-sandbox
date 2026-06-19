@@ -80,6 +80,7 @@ async function main(): Promise<void> {
     // Persistent profile mode (supports passkey/fingerprint login)
     context = await chromium.launchPersistentContext(args.profile, {
       headless: args.headless,
+      executablePath: BRAVE_PATH,
       args: [
         "--no-sandbox",
         "--disable-blink-features=AutomationControlled",

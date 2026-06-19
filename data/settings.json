@@ -1,6 +1,7 @@
 {
   "plan_model": "openrouter-classifier",
   "maker_model": "web-llm-genspark",
+  "_maker_model_note": "v3: Scream 為執行層，此欄位僅供 AgentOS 基礎設施相容使用，非主要執行路徑。Opus 為顧問角色，不進產線。",
   "converse_model": "agnes",
   "checker_model": "openrouter/google/gemma-4-26b-a4b-it:free",
   "checker_fallbacks": [

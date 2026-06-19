@@ -26,13 +26,28 @@
 3. **危險紅線先擋** — 破壞執行環境的指令一律先攔，規則優先，不交給模型判斷。
 4. **決策可追溯** — 每一步分流、派工、驗收都寫進審計日誌。
 
-### 協作架構（與 `.scream-code/ARCHITECTURE.md` 對應）
+### 協作架構（v3 — 五角色）
 
 ```
-Opus（董事 — 戰略判斷）
-Scream Code（監督+規劃 — Foxconn PM）
-Claude Code（執行 — 台積電產線）
-AgentOS（辦公室 — NCC / 規章制度）← 你在這裡
+┌─────────────────────────────────────────────────────────┐
+│                                                         │
+│   Scream Code（計劃 + 執行）                              │
+│   └─ 自己 call LLM、寫 code、判斷交付                     │
+│                                                         │
+│   Claude CLI（僅驗收）                                    │
+│   └─ 不寫 code，只跑 pytest + 審查                        │
+│                                                         │
+│   AgentOS（純 Action 回圈層 — 零智力基礎設施）              │
+│   └─ safety gate / audit log / executor registry         │
+│      / 腦庫 / 黑板 / 協議模板庫                            │
+│                                                         │
+│   Opus 4.8（GenSpark）— 顧問                              │
+│   └─ 不進產線，需要時才諮詢                                │
+│                                                         │
+│   Gemini（super-engine）— 小雜工                          │
+│   └─ 摘要、分類、格式轉換等廉價任務                        │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ### 一條判準
@@ -57,32 +72,42 @@ AgentOS（辦公室 — NCC / 規章制度）← 你在這裡
 │               ↓ clarify gate（模糊輸入先反問一句）     │
 └───────────────────────┬──────────────────────────────┘
                         ↓
-┌──────────────────────────────────────────────────────┐
-│               決策層 Router / Plan                    │
-│  - 清晰度判定：動作 / 對象 / 可驗證完成判準            │
-│  - direct / clarify / align 分流                      │
-│  - align = 產出可派工的 Plan（此處放好模型）            │
-└───────────────────────┬──────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│               Scream 直接執行層（取代 LangGraph 狀態機）     │
+│                                                           │
+│  Scream 自己負責：                                          │
+│  ├─ 理解任務、拆解步驟、call LLM（不限哪家模型）             │
+│  ├─ 寫 code、改 code、跑測試                               │
+│  ├─ 判斷何時該交付、何時該煞車                             │
+│  └─ 需要時諮詢 Opus、派遣 Gemini 做廉價雜工                 │
+│                                                           │
+│  AgentOS 提供基礎設施（不參與決策）：                       │
+│  ├─ safety gate（規則攔截，不給模型判斷）                   │
+│  ├─ clarify gate（模糊輸入反問）                            │
+│  ├─ audit log（記下發生過什麼）                             │
+│  ├─ executor registry（三種 executor type）                 │
+│  ├─ 腦庫（跨 session 記憶）                                │
+│  ├─ 黑板（session 內共享狀態）                              │
+│  └─ 協議模板庫（agent 交互提示詞模板）                      │
+│                                                           │
+└───────────────────────┬───────────────────────────────────┘
                         ↓
-┌──────────────────────────────────────────────────────┐
-│          協作層 Agent Loop (LangGraph 狀態機)          │
-│  START → maker → checker → {pass / retry / escalate} │
-│  （目前：Maker + Checker；未來：多 agent）              │
-└──────┬─────────────────────────────┬─────────────────┘
-       ↓                             ↓
-┌──────────────┐            ┌────────────────────┐
-│  MCP 工具層  │            │   腦庫 / 知識層     │
-│（agent 的手腳）│           │（跨 session 的記憶） │
-│ 搜尋/檔案/CLI/│           │ 專案脈絡/SOP/決策   │
-│  外部 agent  │            │                    │
-└──────┬───────┘            └─────────┬──────────┘
-       ↓                             ↓
-   [外部工具]                   [SQLite 知識庫]
+               ┌────────────────────┐
+               │   外部工具 / 模型   │
+               │  subprocess / MCP  │
+               │  super-engine      │
+               │  腦庫 SQLite       │
+               └────────────────────┘
 
 ── 全程旁掛 ──→ decision_log（審計：誰做了什麼決策、用了什麼工具）
 ```
 
 ### 層級關係（重要，不可配錯）
+- **Scream** 是執行主體，直接 call LLM、寫 code、判斷交付，不經 AgentOS maker proxy。
+- **AgentOS** 是 Scream 下方的基礎設施層，提供安全、審計、調度能力，但不參與智力判斷。
+- **Claude CLI** 是驗收角色，只在需要真實驗收時被 Scream 調用，不寫 code。
+- **Opus 4.8** 是顧問，非產線一環，Scream 遇到架構難題時才諮詢。
+- **Gemini（super-engine）** 是小雜工，負責摘要、分類、格式轉換等廉價任務。
 - **腦庫**是底層共用資源（記憶），所有 agent 透過統一介面讀寫，不直接碰資料庫。
 - **MCP**是工具接入層（手腳），agent 透過它對外。
 - **MCP 工具的調用必須經過 safety gate 與 audit log**，不可繞過。
@@ -95,7 +120,6 @@ AgentOS（辦公室 — NCC / 規章制度）← 你在這裡
 | 節點 | 技術 | 角色 |
 |------|------|------|
 | 後端框架 | FastAPI | API 入口、端點 |
-| 狀態機 | LangGraph | Maker/Checker 循環 |
 | 模型接入 | LiteLLM / llm-router | 統一接多家模型、可切換 |
 | 資料結構 | Pydantic | TaskSpec 等契約定義 |
 | 儲存 | SQLite | 審計日誌 + 腦庫（MVP 階段不用 Postgres） |
@@ -104,6 +128,16 @@ AgentOS（辦公室 — NCC / 規章制度）← 你在這裡
 | Web LLM | super-engine (Playwright + Brave) | Gemini 免費版 / GenSpark(Opus) 兩條線路 |
 | executor registry | orchestrator/executor_registry.py | register/get/list_all/run（支援 subprocess + super-engine + super-engine-warm）|
 | super-engine daemon | super-engine/ask-daemon.ts | Keep-warm HTTP server，瀏覽器常駐，~2s 回應 Gemini |
+
+### 角色對應
+
+| 角色 | 技術對應 | 說明 |
+|------|----------|------|
+| Scream | `scream-code`（主 agent runtime） | 計劃 + 執行，自己 call LLM、寫 code |
+| Claude CLI | `claude`（subprocess） | 僅驗收，跑 pytest + 審查，不寫 code |
+| AgentOS | FastAPI + SQLite + executor registry | 基礎設施層，零智力 |
+| Opus 4.8 | GenSpark（super-engine line 1） | 顧問，不進產線 |
+| Gemini | super-engine daemon（line 2） | 小雜工，低延遲 2.3s |
 
 ### 禁用清單（MVP 階段）
 Postgres、Redis、Docker、雲端服務（資料隱私 + 降複雜度）。
@@ -148,9 +182,11 @@ Plan 階段必須固定以下三種停損，不可事後才補：
 ## 五、目前進度 (Status — 接手前必讀)
 
 已完成（git log 可查）：
-- [x] **角色重構 v2** — Scream 為 Planner+Maker、Claude CLI 為 Checker、AgentOS 為純 Action 回圈層、
-      Opus 為顧問、Gemini 為小雜工；maker.py / checker.py / loop.py 全面重構，
-      新增 POST /task/make 和 POST /task/verify 端點
+- [x] **角色重構 v3** — Scream 直接執行（自己 call LLM、寫 code、判斷交付）、
+      Claude CLI 僅驗收（跑 pytest + 審查）、
+      AgentOS 為純 Action 回圈層（零智力基礎設施）、
+      Opus 4.8（GenSpark）為顧問（不進產線）、
+      Gemini（super-engine）為小雜工（摘要/分類/格式轉換）
 - [x] **審計日誌** decision_log：兩表、event_type 區分 intent_gate / execution_route、
       單 request_id 查完整決策鏈、寫入失敗不阻斷主流程。
 - [x] **Checker 真跑 pytest**：subprocess + timeout=60，過=10 / 敗=2 / 逾時=0，
@@ -181,17 +217,6 @@ Plan 階段必須固定以下三種停損，不可事後才補：
 - [x] **測試覆蓋**：188+ tests（pytest），涵蓋 API、registry、super-engine、safety、blackboard、knowledge
 
 待做（Backlog）：
-- [ ] maker 換強力 coding 模型（D17，需 Ryan 拍板模型字串）。
-- [ ] 用明確 brief 跑完整 Maker→Checker 循環，驗證核心假設（D9）。
-- [ ] frontend clarify_routing UI（後端已完成，前端 A/B 問答尚未實作）。
-- [ ] Agnes 多模態 MCP 接入（D18，roadmap 階段二）。
-- [ ] **AgentOS TUI** — 取代 React desktop app，用 terminal UI（參考 GASP skill 設計）
-- [ ] **GASP skill 研究** — https://github.com/Arvincreator/project-golem（Browser-in-the-Loop 架構參考）
-- [ ] super-engine headless 模式（GenSpark 安全偵測繞過）
-
-待做（Backlog）：
-- [ ] maker 換強力 coding 模型（D17，需 Ryan 拍板模型字串）。
-- [ ] 用明確 brief 跑完整 Maker→Checker 循環，驗證核心假設（D9）。
 - [ ] frontend clarify_routing UI（後端已完成，前端 A/B 問答尚未實作）。
 - [ ] Agnes 多模態 MCP 接入（D18，roadmap 階段二）。
 - [ ] **AgentOS TUI** — 取代 React desktop app，用 terminal UI（參考 GASP skill 設計）
@@ -203,16 +228,17 @@ Plan 階段必須固定以下三種停損，不可事後才補：
 ## 六、路線圖 (Roadmap)
 
 ### 階段一：核心細胞驗證（現在）
-證明 Maker→Checker 兩 agent 循環能收斂並交付可用成果。
-四個必須觀察的指標：Maker 真寫程式碼、Checker 真跑 pytest、失敗真實回退並修正、交付可用。
+證明 **Scream 直接執行 → Claude CLI 驗收** 循環能收斂並交付可用成果。
+Scream 自己寫 code、跑測試、判斷何時交付；Claude CLI 負責客觀驗收（真跑 pytest）。
+三個必須觀察的指標：Scream 能獨立完成任務、Claude CLI 真實驗收、失敗真實回退。
 
 ### 階段二：架構插槽落地
 - 腦庫：接上真實 SQLite 儲存層 + 統一讀寫介面（`read_knowledge` / `write_knowledge`）。
 - MCP：從寫死的工具升級為可註冊、可擴充的工具層；第一個接搜尋工具（解決 agent 不能聯網）。
 
 ### 階段三：多 agent 擴展
-在 Maker/Checker 之外加入更多專長 agent（檢索、規劃、驗證…），
-由 Plan 階段做真正的任務拆解與派工，routing_events 成為跨 agent 追錯的關鍵。
+在 Scream + Claude CLI 之外加入更多專長角色（檢索、規劃、驗證…），
+由 Scream 做真正的任務拆解與派工，routing_events 成為跨 agent 追錯的關鍵。
 
 ### 階段四：外部 agent / CLI 接入（願景的精彩處）
 透過統一介面隔空調度外部 agent 與 CLI（如 Hermes、Claude Code 命令列模式），

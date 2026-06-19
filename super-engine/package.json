@@ -1,0 +1,13 @@
+{
+  "name": "super-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Playwright-based web LLM driver for AgentOS",
+  "dependencies": {
+    "playwright": "^1.58.0"
+  },
+  "scripts": {
+    "ask": "node ask.ts"
+  }
+}

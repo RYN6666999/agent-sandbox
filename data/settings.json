@@ -16,5 +16,22 @@
     "gemini": "",
     "agnes": "",
     "openrouter": ""
+  },
+  "executors": {
+    "claude-code": {
+      "default_model": "claude-sonnet-4-6"
+    },
+    "web-llm-genspark": {
+      "binary": "node",
+      "args": ["super-engine/ask.ts", "--provider", "genspark", "--prompt"],
+      "timeout": 120,
+      "type": "super-engine"
+    },
+    "web-llm-gemini": {
+      "type": "super-engine-warm",
+      "daemon_port": 3456,
+      "daemon_provider": "gemini",
+      "timeout": 120
+    }
   }
 }

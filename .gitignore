@@ -3,3 +3,8 @@
 __pycache__/
 .venv/
 *.pyc
+.sdd/
+.DS_Store
+super-engine/node_modules/
+super-engine/package-lock.json
+super-engine/brave-profile/

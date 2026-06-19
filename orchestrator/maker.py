@@ -1,10 +1,9 @@
 """Maker: produces output from TaskSpec. Uses router to pick model + skills."""
 import json
 import os
-import shutil
-import subprocess
 import sys
 from pathlib import Path
+from typing import Callable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
@@ -12,11 +11,11 @@ load_dotenv()
 
 import litellm
 import requests
-from typing import Callable
 from contracts.task_spec import TaskSpec
 from router import route
 from router.skill_injector import build_system_prompt
 from orchestrator.model_registry import resolve as _resolve
+from orchestrator import executor_registry
 
 BASE_PROMPT = (
     "You are a focused implementer. Produce exactly what is asked. "
@@ -87,41 +86,21 @@ def _mcp_tools_to_litellm(tools: list[dict]) -> list[dict]:
     return out
 
 
-def _make_via_claude_code(spec: TaskSpec, feedback: str, round_n: int,
-                          on_token: "Callable[[str], None] | None") -> str:
-    """Run task via `claude --print` subprocess (uses Pro subscription + all Claude Code tools)."""
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
-        raise RuntimeError("claude CLI not found on PATH — run `npm install -g @anthropic-ai/claude-code`")
-
-    prompt_parts = [f"Task: {spec.why}"]
-    if spec.taste:
-        prompt_parts.append(f"Requirements: {'; '.join(spec.taste)}")
-    if spec.boundaries:
-        prompt_parts.append(f"Do NOT: {'; '.join(spec.boundaries)}")
-    if feedback and round_n > 1:
-        prompt_parts.append(f"\nPrevious attempt feedback (round {round_n}):\n{feedback}")
-
-    prompt = "\n".join(prompt_parts)
-
-    result = subprocess.run(
-        [claude_bin, "--print", "-p", prompt,
-         "--output-format", "text", "--model", "claude-sonnet-4-6"],
-        capture_output=True, text=True, timeout=300,
-    )
-    output = (result.stdout or result.stderr or "").strip()
-    if on_token and output:
-        on_token(output)
-    return output
-
-
 def make(spec: TaskSpec, feedback: str = "", round_n: int = 1,
          on_token: "Callable[[str], None] | None" = None,
          request_id: str | None = None,
          session_id: str | None = None) -> str:
     """Call the routed model and return raw output string."""
     if spec.executor == "claude-code":
-        return _make_via_claude_code(spec, feedback, round_n, on_token)
+        prompt_parts = [f"Task: {spec.why}"]
+        if spec.taste:
+            prompt_parts.append(f"Requirements: {'; '.join(spec.taste)}")
+        if spec.boundaries:
+            prompt_parts.append(f"Do NOT: {'; '.join(spec.boundaries)}")
+        if feedback and round_n > 1:
+            prompt_parts.append(f"\nPrevious attempt feedback (round {round_n}):\n{feedback}")
+        prompt = "\n".join(prompt_parts)
+        return executor_registry.run("claude-code", prompt, timeout=300, on_token=on_token)
 
     settings = _load_settings()
 

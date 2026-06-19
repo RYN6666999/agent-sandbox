@@ -100,7 +100,10 @@ AgentOS（辦公室 — NCC / 規章制度）← 你在這裡
 | 資料結構 | Pydantic | TaskSpec 等契約定義 |
 | 儲存 | SQLite | 審計日誌 + 腦庫（MVP 階段不用 Postgres） |
 | 工具接入 | MCP | agent 的 tool-calling 與外部工具 |
-| 前端 | React (earth-tone UI) | 聊天 / 任務介面 |
+| 前端 | React (earth-tone UI) | 聊天 / 任務介面（⚠️ 評估中：可能改用 TUI） |
+| Web LLM | super-engine (Playwright + Brave) | Gemini 免費版 / GenSpark(Opus) 兩條線路 |
+| executor registry | orchestrator/executor_registry.py | register/get/list_all/run（支援 subprocess + super-engine + super-engine-warm）|
+| super-engine daemon | super-engine/ask-daemon.ts | Keep-warm HTTP server，瀏覽器常駐，~2s 回應 Gemini |
 
 ### 禁用清單（MVP 階段）
 Postgres、Redis、Docker、雲端服務（資料隱私 + 降複雜度）。
@@ -112,12 +115,21 @@ Postgres、Redis、Docker、雲端服務（資料隱私 + 降複雜度）。
 - `orchestrator/clarify.py` — 模糊輸入反問閘門
 - `orchestrator/maker.py` — Maker（執行層，settings["maker_model"] 覆蓋 mapping.py）
 - `orchestrator/model_registry.py` — alias → LiteLLM kwargs（3 tier：alias / openrouter/ / raw）
+- `orchestrator/executor_registry.py` — registry 核心（register/get/list/run，三種 type）
+- `orchestrator/blackboard.py` — .sdd/ 檔案系統黑板
 - `align/core.py` — align 階段產出可派工 task brief
-- `api/main.py` — /chat 與 /converse 端點；clarify_routing mode；forced_mode 支援
+- `api/main.py` — /chat / /converse / /task/run / /blackboard / /executors 端點
 - `router/classifier.py` — routing_intent()：3向分類（answer/code/unclear）
 - `router/` — 模型/技能路由
-- `contracts/` — TaskSpec 規格定義
-- `data/settings.json` — 執行期設定（plan_model / maker_model / checker_model / ...）
+- `contracts/` — TaskSpec 規格定義（含 executor 欄位）
+- `data/settings.json` — 執行期設定（含 executors 設定）
+- `super-engine/ask-daemon.ts` — 🔥 Keep-warm HTTP daemon（port 3456，瀏覽器常駐）
+- `super-engine/ask.ts` — One-shot CLI 模式（備用）
+- `super-engine/config.js` — Provider 設定（genspark, gemini 兩條線路）
+- `super-engine/setup-profile.ts` — Brave profile 一次性設定（指紋登入）
+- `super-engine/brave-profile/` — 🔑 已登入的 Brave profile
+- `scripts/agentos.sh` — Scream → AgentOS shell client
+- `scripts/login-genspark.sh` — GenSpark 登入 helper
 - `ui/src/store.ts` — 前端狀態機（Zustand）
 - `ui/src/api.ts` — 前端 → 後端 HTTP contract
 
@@ -147,14 +159,24 @@ Plan 階段必須固定以下三種停損，不可事後才補：
       棄信心閥值（推理模型不輸出低信心）（見 D14）。
 - [x] **model settings 統一**：三個 agent 都從 settings.json 讀模型；
       maker dead field 修復（見 D15）；model_registry 三 tier resolve（見 D13）。
-- [x] **測試覆蓋**：163 tests（158 pytest + 5 Vitest），涵蓋 API 流程、safety gate bypass 防護、
-      store 狀態機。
+- [x] **executor registry** — register/get/list/run 四介面，支援 subprocess / super-engine / super-engine-warm 三種 type
+- [x] **Blackboard HTTP API** — GET/POST /blackboard 端點
+- [x] **/task/run 同步端點** — safety gate → loop → blocking 結果
+- [x] **scripts/agentos.sh** — shell client（run / blackboard / executors / health）
+- [x] **super-engine** — Playwright 驅動 Brave，兩條 provider 線路
+      - GenSpark (Opus 4.8)：visible browser ~13-27s
+      - Gemini 免費版：daemon warm 模式 **2.3s** 🔥
+- [x] **keep-warm daemon** — ask-daemon.ts HTTP server（port 3456），瀏覽器常駐零啟動
+- [x] **測試覆蓋**：170+ tests（pytest），涵蓋 API、registry、super-engine、safety、blackboard
 
 待做（Backlog）：
 - [ ] maker 換強力 coding 模型（D17，需 Ryan 拍板模型字串）。
 - [ ] 用明確 brief 跑完整 Maker→Checker 循環，驗證核心假設（D9）。
 - [ ] frontend clarify_routing UI（後端已完成，前端 A/B 問答尚未實作）。
 - [ ] Agnes 多模態 MCP 接入（D18，roadmap 階段二）。
+- [ ] **AgentOS TUI** — 取代 React desktop app，用 terminal UI（參考 GASP skill 設計）
+- [ ] **GASP skill 研究** — https://github.com/Arvincreator/project-golem（Browser-in-the-Loop 架構參考）
+- [ ] super-engine headless 模式（GenSpark 安全偵測繞過）
 
 ---
 

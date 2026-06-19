@@ -639,6 +639,101 @@ async def deliver(req: DeliverRequest):
     return {"ok": True, "accepted": req.accepted}
 
 
+# ── Blackboard HTTP API ────────────────────────────────────────────────────
+
+
+class BlackboardWriteRequest(BaseModel):
+    data: dict
+
+
+@app.get("/blackboard/{key_prefix}")
+def blackboard_read(key_prefix: str):
+    """Read latest blackboard entry by key prefix."""
+    from orchestrator import blackboard
+    data = blackboard.read_latest(key_prefix)
+    if data is None:
+        raise HTTPException(404, f"no blackboard entry for prefix '{key_prefix}'")
+    return data
+
+
+@app.post("/blackboard/{key}")
+def blackboard_write(key: str, req: BlackboardWriteRequest):
+    """Write to blackboard under the given key."""
+    from orchestrator import blackboard
+    path = blackboard.write(key, req.data)
+    return {"ok": True, "path": str(path)}
+
+
+# ── executor registry ──────────────────────────────────────────────────────
+
+
+@app.get("/executors")
+def list_executors():
+    """List all registered executors."""
+    from orchestrator import executor_registry
+    return {"executors": executor_registry.list_all()}
+
+
+# ── synchronous task execution (for Scream curl client) ────────────────────
+
+
+class TaskRunRequest(BaseModel):
+    task: str
+    executor: str = "litellm"  # "litellm" | "claude-code"
+
+    @field_validator("executor")
+    @classmethod
+    def executor_valid(cls, v: str) -> str:
+        if v not in ("litellm", "claude-code"):
+            raise ValueError("executor must be 'litellm' or 'claude-code'")
+        return v
+
+
+class TaskRunResponse(BaseModel):
+    status: str
+    output: str = ""
+    rounds: int = 0
+    final_score: float | None = None
+    error: str = ""
+
+
+@app.post("/task/run", response_model=TaskRunResponse)
+async def task_run(req: TaskRunRequest):
+    """Synchronous task execution. Runs full Maker/Checker loop, returns result."""
+    TASK_RUN_TIMEOUT = 300  # seconds
+
+    # Safety gate
+    from orchestrator.safety import is_dangerous
+    dangerous, triggers = is_dangerous(req.task)
+    if dangerous:
+        return TaskRunResponse(
+            status="blocked",
+            error=f"Dangerous command blocked: {', '.join(triggers)}",
+        )
+
+    # Build spec
+    spec = _make_loop_spec(req.task)
+    if req.executor == "claude-code":
+        spec = spec.model_copy(update={"executor": "claude-code"})
+
+    # Run loop (sync blocking call in thread pool)
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(run_loop, spec),
+            timeout=TASK_RUN_TIMEOUT,
+        )
+        return TaskRunResponse(
+            status=result.get("status", "error"),
+            output=result.get("output", ""),
+            rounds=result.get("rounds", 0),
+            final_score=result.get("final_score"),
+        )
+    except asyncio.TimeoutError:
+        return TaskRunResponse(status="timeout", error=f"Task exceeded {TASK_RUN_TIMEOUT}s timeout")
+    except Exception as e:
+        return TaskRunResponse(status="error", error=str(e))
+
+
 @app.get("/session/{session_id}")
 def get_session(session_id: str):
     s = sessions.get(session_id)

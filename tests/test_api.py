@@ -214,3 +214,44 @@ def test_models_returns_list():
     assert "models" in body
     assert isinstance(body["models"], list)
     assert len(body["models"]) > 0
+
+
+# ── /task/run (Scream client sync endpoint) ─────────────────────────────────
+
+def test_task_run_blocked_by_safety():
+    """危險任務被 safety gate 擋住。"""
+    r = client.post("/task/run", json={"task": "rm -rf /production"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "blocked"
+    assert "dangerous" in body["error"].lower()
+
+
+def test_task_run_invalid_executor():
+    r = client.post("/task/run", json={"task": "hello", "executor": "invalid"})
+    assert r.status_code == 422
+
+
+def test_task_run_success():
+    """Mock loop.run to return success without langgraph."""
+    with patch("api.main.run_loop") as mock_loop_run:
+        mock_loop_run.return_value = {
+            "status": "done",
+            "output": "def hello(): pass",
+            "rounds": 1,
+            "final_score": 8.0,
+        }
+        r = client.post("/task/run", json={"task": "write hello function"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "done"
+    assert "hello" in body["output"]
+
+
+def test_task_run_executor_sets_spec():
+    """executor=claude-code 讓 spec.executor 被設為 claude-code。"""
+    with patch("api.main.run_loop") as mock_loop_run:
+        mock_loop_run.return_value = {"status": "done", "output": "", "rounds": 1}
+        client.post("/task/run", json={"task": "debug bug", "executor": "claude-code"})
+        called_spec = mock_loop_run.call_args[0][0]
+        assert called_spec.executor == "claude-code"

@@ -126,3 +126,56 @@ def test_blackboard_write_read():
     data = blackboard.read_latest("test_entry")
     assert data is not None
     assert data["value"] == 42
+
+
+# ── Executor Registry ──────────────────────────────────────────────────────
+
+def test_executor_registry_has_claude_code():
+    """claude-code should be pre-registered with correct config."""
+    from orchestrator import executor_registry
+    defn = executor_registry.get("claude-code")
+    assert defn is not None
+    assert defn["binary"] == "claude"
+    assert defn["type"] == "subprocess"
+    assert defn["default_model"] == "claude-sonnet-4-6"
+
+
+def test_executor_registry_list_contains_claude_code():
+    from orchestrator import executor_registry
+    all_ = executor_registry.list_all()
+    names = [e["name"] for e in all_]
+    assert "claude-code" in names
+
+
+def test_executor_registry_get_unknown_returns_none():
+    from orchestrator import executor_registry
+    assert executor_registry.get("nonexistent") is None
+
+
+def test_executor_registry_register_and_retrieve():
+    from orchestrator import executor_registry
+    executor_registry.register({
+        "name": "test-exec",
+        "binary": "/usr/bin/echo",
+        "timeout": 10,
+    })
+    defn = executor_registry.get("test-exec")
+    assert defn is not None
+    assert defn["binary"] == "/usr/bin/echo"
+
+
+def test_executor_registry_super_engine_type():
+    """super-engine type executor can be registered with args field."""
+    from orchestrator import executor_registry
+    executor_registry.register({
+        "name": "super-engine-test",
+        "binary": "node",
+        "args": ["ask.ts", "--provider", "genspark", "--prompt"],
+        "timeout": 120,
+        "type": "super-engine",
+    })
+    defn = executor_registry.get("super-engine-test")
+    assert defn is not None
+    assert defn["type"] == "super-engine"
+    assert "args" in defn
+    assert "--prompt" in defn["args"]

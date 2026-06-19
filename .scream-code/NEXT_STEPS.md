@@ -261,7 +261,54 @@ curl -X POST http://localhost:8000/task/run \
 
 ---
 
-## 六、紅線
+## 七、實戰驗證（2026-06-20 Session）
+
+### Phase 5：v3 架構實戰驗證 ✅
+
+**核心發現：DeepSeek v4-flash（OpenRouter）為主要模型，GenSpark 降為備用。**
+
+在 Scream Code 環境中直接 call DeepSeek v4-flash 效果極好（快、穩、便宜），
+GenSpark（Opus 4.8）因 13-27s 延遲 + 偶發 crash，定位從「主要模型供應層」降為「備用路徑」。
+
+| 驗證項目 | 結果 | 證據 |
+|----------|------|------|
+| `/task/make` + web-llm-genspark | ✅ 13.5s 回應 | Opus 4.8 正常 |
+| `/task/verify` + pytest pass | ✅ score=10.0 | 真跑 subprocess pytest |
+| `/task/verify` + pytest fail | ✅ score=2.0 + 完整 error feedback | 含 assertion 詳細 |
+| ask.ts Brave path 修正 | ✅ `executablePath: BRAVE_PATH` | 不再用 Playwright 內建 Chromium |
+| maker.py executor routing 修正 | ✅ maker_model 為 executor 時走 registry | web-llm-genspark 正確路由 |
+
+### 文件修正（Phase 5b ✅）
+
+v3 commit 引入了大量貶抑性用詞（「零智力」「不進產線」「已降級」「不適用」「僅供相容」），
+與實際運作狀況不符。本次 session 全面清除並推送：
+
+| 檔案 | 修改 |
+|------|------|
+| `.scream-code/ARCHITECTURE.md` | 9 處：Opus 改「可選執行層」、`/task/make` 改「雙路徑之一」、移除「零智力」等 |
+| `PROJECT.md` | 6 處：同步修正 + Agnes 多模態工具描述 |
+| `DECISIONS.md` | D23 用語修正 |
+| `.scream-code/NEXT_STEPS.md` | 「降級」→「非主要路徑但保留可用」 |
+| `README.md` | 1 處 |
+| `data/settings.json` | `_maker_model_note` 改中性 |
+
+### 協作模式確立（Phase 5c ✅）
+
+確立三種協作模式的邊界，寫入 `COLLAB-MODES.md`：
+
+| 模式 | 關係 | 適合 |
+|------|------|------|
+| Subagent | 父子（主 agent 的延伸工具） | 單一步驟，結果要回來整合 |
+| WolfPack | 父子（平行派工） | 多個獨立任務，無依賴 |
+| 跨視窗 | 平行（獨立 session） | 兩條互不相干的獨立路線 |
+
+### 專案方向確認
+
+- **Scream + DeepSeek v4-flash** = 日常主要 workflow
+- **AgentOS 腦庫** = 目前最有價值的功能（跨 session 記憶）
+- **AgentOS executor registry / verify** = 備用（大型專案時啟用）
+- **TUI** = 不需要做
+- **數位孿生 / 基因系統** = 列為未來大專案，等完整 AgentOS 生態 ready 再啟動
 
 1. 不要重新設計 TaskSpec 或停損邏輯 — A2A 的 task state 跟你的停損是兩層東西
 2. 每個 CLI 的 flag 要 `--help` 實測，不要憑記憶寫

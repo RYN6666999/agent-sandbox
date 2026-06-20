@@ -64,15 +64,24 @@ e41dda0 test: 新增端到端整合測試 — /task/make + /task/verify 9 項
 - 記憶固化機制
 - MCP 搜尋工具（web-search executor + /search API + 18 項測試）
 - Agnes 多模態 MCP（agnes-analyze / agnes-image / agnes-video executors + 4 API endpoints + 20 項測試）
+- Skill Bridge（自動掛載 Claude CLI 17 個 executable skill → 33 個 executor + 掃描 API + 9 項測試）
 
 ### 待辦（依優先序）
 
 ```
-P0: 端到端測試 ✅（已完成）
-P1: 記憶固化 ✅（已完成）
-P2: MCP 搜尋工具接入 ✅（已完成）
-P3: Agnes 多模態 MCP ✅（已完成）
-Roadmap 階段二完成 🎉
+已完成:
+  P0: 端到端測試 ✅
+  P1: 記憶固化 ✅
+  P2: MCP 搜尋工具 ✅
+  P3: Agnes 多模態 MCP ✅
+  Session A: Skill Bridge ✅
+  ──────────── Roadmap 階段二完成 🎉
+
+下一個:
+  Session C: Scheduler（排程自動化）🔜
+  Session B: 成本 Model Router
+  Session D: 自動學習
+
 Backlog: clarify_routing UI / headless / 沙箱
 ```
 

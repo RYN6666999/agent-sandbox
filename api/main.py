@@ -795,6 +795,16 @@ async def search_web_get(q: str, count: int = 5):
         return {"query": q, "results": [], "count": 0, "error": str(e)}
 
 
+# ── skill bridge ─────────────────────────────────────────────────────────
+
+
+@app.post("/skill-bridge/scan")
+def skill_bridge_scan():
+    """Scan .claude/skills/ and auto-register executable skills as executors."""
+    from orchestrator.skill_bridge import scan
+    return scan(force=True)
+
+
 # ── Agnes multimodal ──────────────────────────────────────────────────────
 
 

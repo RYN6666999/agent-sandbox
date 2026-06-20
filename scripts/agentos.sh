@@ -132,7 +132,7 @@ cmd_knowledge_write() {
     local body
     body=$(printf '{"content": %s}' "$(echo "$content" | jq -Rs '.' )")
 
-    curl -s -X POST "$BASE/knowledge?key=$(echo "$key" | jq -sRr @uri)" \
+    curl -s -X POST "$BASE/knowledge/$(echo "$key" | jq -sRr @uri)" \
         -H "Content-Type: application/json" \
         -d "$body" | jq .
 }
@@ -206,7 +206,7 @@ cmd_protocol() {
             body=$(printf '{"content": %s}' "$(echo "$content" | jq -Rs '.' )")
 
             echo "▶ 推送協議 '$name' 到腦庫..." >&2
-            curl -s -X POST "$BASE/knowledge?key=protocol/$name" \
+            curl -s -X POST "$BASE/knowledge/protocol/$name" \
                 -H "Content-Type: application/json" \
                 -d "$body" | jq .
             ;;

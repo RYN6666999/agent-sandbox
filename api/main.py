@@ -666,7 +666,7 @@ class KnowledgeWriteRequest(BaseModel):
     metadata: dict = {}
 
 
-@app.post("/knowledge")
+@app.post("/knowledge/{key:path}")
 def knowledge_write(key: str, req: KnowledgeWriteRequest):
     """Write a knowledge entry."""
     from orchestrator.knowledge import write_knowledge, ensure_schema

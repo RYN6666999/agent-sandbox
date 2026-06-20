@@ -71,10 +71,9 @@
 
 **方式 A：直接寫腦庫（最簡單）**
 ```bash
-curl -X POST http://localhost:8000/knowledge \
+curl -X POST http://localhost:8000/knowledge/gene/coding/never-use-relative-path \
   -H "Content-Type: application/json" \
   -d '{
-    "key": "gene/coding/never-use-relative-path",
     "content": "在 AgentOS 專案中...",
     "metadata": {"domain": "coding", "type": "bug-fix", ...}
   }'

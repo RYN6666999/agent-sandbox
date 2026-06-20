@@ -12,6 +12,40 @@
   "max_tokens": 2048,
   "system_prompt": "",
   "mcp_servers": [],
+  "executors": {
+    "web-search": {
+      "name": "web-search",
+      "binary": "python",
+      "flags": ["scripts/search-web.py"],
+      "type": "subprocess",
+      "timeout": 20,
+      "description": "Search the web via DuckDuckGo"
+    },
+    "agnes-analyze": {
+      "name": "agnes-analyze",
+      "binary": "python",
+      "flags": ["scripts/agnes-analyze.py"],
+      "type": "subprocess",
+      "timeout": 60,
+      "description": "Analyze image with Agnes vision model"
+    },
+    "agnes-image": {
+      "name": "agnes-image",
+      "binary": "python",
+      "flags": ["scripts/agnes-image.py"],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Generate image with Agnes image model"
+    },
+    "agnes-video": {
+      "name": "agnes-video",
+      "binary": "python",
+      "flags": ["scripts/agnes-video.py"],
+      "type": "subprocess",
+      "timeout": 300,
+      "description": "Generate video with Agnes video model"
+    }
+  },
   "api_keys": {
     "gemini": "",
     "agnes": "",

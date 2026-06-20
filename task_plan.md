@@ -50,9 +50,15 @@ Roadmap 階段二的「第一個接搜尋工具」：
 - 研究 Scream Code 支援的 MCP server
 - 實作搜尋 executor，包裝成 executor registry 的一員
 
-### P3: Agnes 多模態 MCP 接入
+### P3: Agnes 多模態 MCP 接入 ✅ 已完成
 
-Agnes 看圖/產圖能力掛成 MCP tool。需要 Agnes API key 和接線測試。
+Agnes 看圖/產圖/產影片能力掛成 MCP tool：
+- orchestrator/agnes.py — analyze_image / generate_image / generate_video / get_video_status
+- scripts/agnes-analyze.py / agnes-image.py / agnes-video.py — CLI wrapper
+- settings.json — 註冊 agnes-analyze / agnes-image / agnes-video executor
+- api/main.py — POST /vision/analyze, /image/generate, /video/generate + GET /video/status/{id}
+- tests/test_agnes.py — 20 項測試全過
+- protocols/agnes-multimodal.md — 多模態協議
 
 ---
 

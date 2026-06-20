@@ -795,6 +795,80 @@ async def search_web_get(q: str, count: int = 5):
         return {"query": q, "results": [], "count": 0, "error": str(e)}
 
 
+# ── Agnes multimodal ──────────────────────────────────────────────────────
+
+
+class AnalyzeImageRequest(BaseModel):
+    image_url: str | None = None
+    image_base64: str | None = None
+    prompt: str = "Describe this image in detail."
+
+
+class GenerateImageRequest(BaseModel):
+    prompt: str
+    size: str = "1024x1024"
+    n: int = 1
+
+
+class GenerateVideoRequest(BaseModel):
+    prompt: str
+
+
+@app.post("/vision/analyze")
+async def vision_analyze(req: AnalyzeImageRequest):
+    """Analyze an image via Agnes vision model."""
+    from orchestrator.agnes import analyze_image
+
+    try:
+        result = await asyncio.to_thread(
+            analyze_image,
+            image_url=req.image_url,
+            image_base64=req.image_base64,
+            prompt=req.prompt,
+        )
+        return result
+    except Exception as e:
+        return {"analysis": "", "error": str(e)}
+
+
+@app.post("/image/generate")
+async def image_generate(req: GenerateImageRequest):
+    """Generate an image via Agnes image model."""
+    from orchestrator.agnes import generate_image
+
+    try:
+        result = await asyncio.to_thread(
+            generate_image, prompt=req.prompt, size=req.size, n=req.n
+        )
+        return result
+    except Exception as e:
+        return {"url": "", "error": str(e)}
+
+
+@app.post("/video/generate")
+async def video_generate(req: GenerateVideoRequest):
+    """Submit a video generation task (async, returns task_id)."""
+    from orchestrator.agnes import generate_video
+
+    try:
+        result = await asyncio.to_thread(generate_video, prompt=req.prompt)
+        return result
+    except Exception as e:
+        return {"task_id": "", "status": "error", "error": str(e)}
+
+
+@app.get("/video/status/{task_id}")
+async def video_status(task_id: str):
+    """Poll video generation status by task_id."""
+    from orchestrator.agnes import get_video_status
+
+    try:
+        result = await asyncio.to_thread(get_video_status, task_id=task_id)
+        return result
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 # ── synchronous task execution ─────────────────────────────────────────────
 
 

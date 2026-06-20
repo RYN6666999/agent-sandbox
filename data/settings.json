@@ -1,13 +1,11 @@
 {
   "plan_model": "openrouter-classifier",
   "maker_model": "web-llm-genspark",
-  "_maker_model_note": "v3: Scream 為執行層，此欄位保留可用，非主要執行路徑。Opus 為顧問角色，選用執行路徑。",
   "converse_model": "agnes",
   "checker_model": "openrouter/google/gemma-4-26b-a4b-it:free",
   "checker_fallbacks": [
     "agnes"
   ],
-  "checker_use_executor": "web-llm-gemini",
   "routing_confidence_threshold": 0.8,
   "max_rounds": 5,
   "temperature": 0.7,
@@ -18,38 +16,5 @@
     "gemini": "",
     "agnes": "",
     "openrouter": ""
-  },
-  "executors": {
-    "claude-code": {
-      "default_model": "claude-sonnet-4-6"
-    },
-    "web-llm-genspark": {
-      "binary": "node",
-      "args": ["super-engine/ask.ts", "--provider", "genspark", "--prompt"],
-      "timeout": 120,
-      "type": "super-engine"
-    },
-    "web-llm-gemini": {
-      "type": "super-engine-warm",
-      "daemon_port": 3456,
-      "daemon_provider": "gemini",
-      "timeout": 120
-    },
-    "agnes-image": {
-      "binary": "python3",
-      "args": ["scripts/agnes_image.py"],
-      "timeout": 120,
-      "type": "subprocess",
-      "prompt_flag": "",
-      "description": "Generate images via Agnes Image API (agnes-image-2.1-flash)"
-    },
-    "agnes-video": {
-      "binary": "python3",
-      "args": ["scripts/agnes_video.py"],
-      "timeout": 120,
-      "type": "subprocess",
-      "prompt_flag": "",
-      "description": "Generate video via Agnes Video API (agnes-video-v2.0, async)"
-    }
   }
 }

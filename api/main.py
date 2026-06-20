@@ -747,6 +747,54 @@ def brain_consolidate(req: ConsolidateRequest):
         return ConsolidateResponse(ok=False, errors=[str(e)])
 
 
+# ── web search ─────────────────────────────────────────────────────────────
+
+
+class SearchRequest(BaseModel):
+    query: str
+    count: int = 5
+
+
+@app.post("/search")
+async def search_web_endpoint(req: SearchRequest):
+    """Search the web via the web-search executor.
+
+    Returns JSON with keys: query, results (list of {title, url, snippet}), count, error.
+    """
+    from orchestrator import executor_registry
+
+    try:
+        output = await asyncio.to_thread(
+            executor_registry.run, "web-search", req.query
+        )
+        data = json.loads(output)
+        # Trim results to requested count
+        if data.get("results") and len(data["results"]) > req.count:
+            data["results"] = data["results"][:req.count]
+            data["count"] = len(data["results"])
+        return data
+    except Exception as e:
+        return {"query": req.query, "results": [], "count": 0, "error": str(e)}
+
+
+@app.get("/search")
+async def search_web_get(q: str, count: int = 5):
+    """GET variant — convenient for quick lookups."""
+    from orchestrator import executor_registry
+
+    try:
+        output = await asyncio.to_thread(
+            executor_registry.run, "web-search", q
+        )
+        data = json.loads(output)
+        if data.get("results") and len(data["results"]) > count:
+            data["results"] = data["results"][:count]
+            data["count"] = len(data["results"])
+        return data
+    except Exception as e:
+        return {"query": q, "results": [], "count": 0, "error": str(e)}
+
+
 # ── synchronous task execution ─────────────────────────────────────────────
 
 

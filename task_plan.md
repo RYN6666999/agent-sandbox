@@ -44,7 +44,7 @@ memory-consolidation-plan.md 已建立，待執行：
 - 從 session 經驗中萃取基因
 - 寫入腦庫作為永久知識
 
-### P2: MCP 搜尋工具接入
+### P2: MCP 搜尋工具接入 ✅ 已完成
 
 Roadmap 階段二的「第一個接搜尋工具」：
 - 研究 Scream Code 支援的 MCP server

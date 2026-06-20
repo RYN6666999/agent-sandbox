@@ -225,6 +225,9 @@ Plan 階段必須固定以下三種停損，不可事後才補：
       maker.py executor routing 修正 ✅
 - [x] **Agnes 多模態 executors 接入** — agnes-image（agnes-image-2.1-flash）、
       agnes-video（agnes-video-v2.0）正式註冊為 executor
+- [x] **MCP 搜尋工具接入** — `orchestrator/search.py`（DuckDuckGo HTML 解析器，純 stdlib）、
+      `scripts/search-web.py`（CLI wrapper，註冊為 subprocess executor）、
+      `POST/GET /search` API 端點、18 項測試全過
 
 待做（Backlog）：
 - [ ] 端到端整合測試（test_maker_super_engine、test_verify_pytest_pass/fail/no-test）

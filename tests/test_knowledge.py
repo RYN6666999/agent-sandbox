@@ -19,6 +19,10 @@ from orchestrator import knowledge
 def temp_knowledge_db(tmp_path, monkeypatch):
     db_path = tmp_path / "knowledge.db"
     monkeypatch.setenv("AGENTOS_KNOWLEDGE_DB_PATH", str(db_path))
+    # Disable gbrain for unit tests (no network calls)
+    fake_settings = tmp_path / "settings.json"
+    fake_settings.write_text(json.dumps({"gbrain": {"enabled": False}}), encoding="utf-8")
+    monkeypatch.setattr(knowledge, "_load_gbrain_config", lambda: {"url": "", "enabled": False, "token": ""})
     assert knowledge.ensure_schema() is True
     yield db_path
 
@@ -247,3 +251,40 @@ def test_read_key_with_slashes(temp_knowledge_db):
     results = knowledge.read_knowledge("project/svelte/setup")
     assert len(results) == 1
     assert results[0]["content"] == "npm install"
+
+
+# ── GBrain integration tests ────────────────────────────────────────────────
+
+
+def test_gbrain_write_silent_when_disabled(monkeypatch, tmp_path):
+    """GBrain write should silently skip when disabled."""
+    db_path = tmp_path / "knowledge.db"
+    monkeypatch.setenv("AGENTOS_KNOWLEDGE_DB_PATH", str(db_path))
+    knowledge.ensure_schema()
+    # Should not raise even with GBrain disabled
+    entry_id = knowledge.write_knowledge("test/gbrain-off", "content when gbrain off")
+    assert len(entry_id) == 16
+
+
+def test_gbrain_read_fallback_when_disabled(monkeypatch, tmp_path):
+    """read_knowledge should work normally when GBrain disabled (no fallback)."""
+    db_path = tmp_path / "knowledge.db"
+    monkeypatch.setenv("AGENTOS_KNOWLEDGE_DB_PATH", str(db_path))
+    knowledge.ensure_schema()
+    knowledge.write_knowledge("test/existing", "local content")
+    results = knowledge.read_knowledge("test/existing")
+    assert len(results) == 1
+    assert results[0]["content"] == "local content"
+
+
+def test_gbrain_search_merges_results_when_disabled(monkeypatch, tmp_path):
+    """search_knowledge should return local-only results when GBrain disabled."""
+    db_path = tmp_path / "knowledge.db"
+    monkeypatch.setenv("AGENTOS_KNOWLEDGE_DB_PATH", str(db_path))
+    knowledge.ensure_schema()
+    knowledge.write_knowledge("test/search", "searchable content for gbrain merge test")
+    results = knowledge.search_knowledge("searchable")
+    assert len(results) >= 1
+    # All results should be local (no source='gbrain')
+    for r in results:
+        assert r.get("source") != "gbrain"

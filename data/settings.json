@@ -396,5 +396,10 @@
     "gemini": "",
     "agnes": "",
     "openrouter": ""
+  },
+  "gbrain": {
+    "enabled": true,
+    "url": "http://localhost:4242",
+    "token": ""
   }
 }

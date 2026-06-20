@@ -22,11 +22,161 @@ import json
 import os
 import sqlite3
 import threading
+import urllib.request
+import urllib.error
 import uuid
 from pathlib import Path
 from typing import Any
 
 _DB_LOCK = threading.Lock()
+
+# ── GBrain integration ──────────────────────────────────────────────────────────
+
+_GBRAIN_DEFAULT_URL = "http://localhost:3457"
+
+
+def _load_gbrain_config() -> dict[str, Any]:
+    """Read gbrain settings from data/settings.json.
+
+    Returns {"url": "http://...", "enabled": True, "token": "..."} or disabled config.
+    """
+    settings_path = Path(__file__).parent.parent / "data" / "settings.json"
+    try:
+        if settings_path.exists():
+            raw = settings_path.read_text(encoding="utf-8")
+            cfg = json.loads(raw)
+            gbrain = cfg.get("gbrain", {})
+            if gbrain.get("enabled", False):
+                return {
+                    "url": gbrain.get("url", _GBRAIN_DEFAULT_URL),
+                    "token": gbrain.get("token", ""),
+                    "enabled": True,
+                }
+    except Exception:
+        pass
+    return {"url": _GBRAIN_DEFAULT_URL, "enabled": False, "token": ""}
+
+
+def _gbrain_request(
+    method: str,
+    path: str,
+    body: dict[str, Any] | None = None,
+    timeout: int = 10,
+) -> dict[str, Any] | None:
+    """Make an HTTP request to GBrain. Returns parsed JSON or None on failure."""
+    cfg = _load_gbrain_config()
+    if not cfg["enabled"]:
+        return None
+
+    url = f"{cfg['url']}{path}"
+    try:
+        data = json.dumps(body).encode("utf-8") if body else None
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Content-Type", "application/json")
+        if cfg.get("token"):
+            req.add_header("Authorization", f"Bearer {cfg['token']}")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
+        print(f"[knowledge] gbrain request failed ({method} {path}): {exc}", file=__import__('sys').stderr)
+        return None
+
+
+def _gbrain_write(key: str, content: str, metadata: dict[str, Any] | None = None) -> None:
+    """Write a knowledge entry to GBrain as a page via PUT /page?sync=1.
+
+    knowledge.py key → GBrain page slug.
+    """
+    cfg = _load_gbrain_config()
+    if not cfg["enabled"]:
+        return
+
+    slug = key
+    frontmatter = metadata or {}
+    # GBrain only allows specific tag values
+    domain = frontmatter.get("domain", "project")
+    allowed_tags = {"preference", "fact", "method", "project", "person", "decision"}
+    tag = domain if domain in allowed_tags else "project"
+
+    body = {
+        "slug": slug,
+        "content": content,
+        "tags": [tag],
+        "source": "agentos",
+    }
+    if frontmatter:
+        body["frontmatter"] = json.dumps(frontmatter, ensure_ascii=False)
+
+    _gbrain_request("PUT", f"/page?sync=1", body=body, timeout=10)
+
+
+def _gbrain_read(key: str, limit: int = 5) -> list[dict[str, Any]]:
+    """Read entries from GBrain by slug prefix. Returns empty list on failure."""
+    cfg = _load_gbrain_config()
+    if not cfg["enabled"]:
+        return []
+
+    import urllib.parse
+    params = urllib.parse.urlencode({"slug": key, "limit": limit})
+    url = f"{cfg['url']}/page?{params}"
+
+    try:
+        req = urllib.request.Request(url, method="GET")
+        if cfg.get("token"):
+            req.add_header("Authorization", f"Bearer {cfg['token']}")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if isinstance(data, dict) and data.get("ok") and data.get("page"):
+                page = data["page"]
+                return [{
+                    "id": f"gbrain-{page.get('slug', key)}",
+                    "key": page.get("slug", key),
+                    "content": page.get("compiled_truth", ""),
+                    "metadata": page.get("frontmatter", {}),
+                    "created_at": page.get("created_at", ""),
+                    "updated_at": page.get("updated_at", ""),
+                    "source": "gbrain",
+                }]
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
+        print(f"[knowledge] gbrain read failed for key={key}: {exc}", file=__import__('sys').stderr)
+    return []
+
+
+def _gbrain_search(query: str, limit: int = 5) -> list[dict[str, Any]]:
+    """Search GBrain via hybrid search. Returns empty list on failure."""
+    cfg = _load_gbrain_config()
+    if not cfg["enabled"]:
+        return []
+
+    import urllib.parse
+    params = urllib.parse.urlencode({"q": query, "limit": limit})
+    url = f"{cfg['url']}/search?{params}"
+
+    try:
+        req = urllib.request.Request(url, method="GET")
+        if cfg.get("token"):
+            req.add_header("Authorization", f"Bearer {cfg['token']}")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = []
+            if isinstance(data, dict) and data.get("ok"):
+                hits = data.get("results", data.get("hits", []))
+                for hit in hits:
+                    page = hit.get("page", hit)
+                    results.append({
+                        "id": f"gbrain-{page.get('slug', '')}",
+                        "key": page.get("slug", ""),
+                        "content": page.get("compiled_truth", hit.get("snippet", "")),
+                        "metadata": page.get("frontmatter", {}),
+                        "created_at": page.get("created_at", ""),
+                        "updated_at": page.get("updated_at", ""),
+                        "rank": hit.get("score", 0),
+                        "source": "gbrain",
+                    })
+            return results
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
+        print(f"[knowledge] gbrain search failed for query={query}: {exc}", file=__import__('sys').stderr)
+    return []
 
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "knowledge.db"
 
@@ -114,6 +264,9 @@ def write_knowledge(
     If an entry with the same *key* already exists, it is **appended** as a
     new row — keys are not unique. This preserves a history of updates for
     the same topic.
+
+    When GBrain is enabled, the entry is also written to GBrain as a page
+    via GET /write?action=put_page.
     """
     entry_id = uuid.uuid4().hex[:16]
     meta_json = json.dumps(metadata or {}, ensure_ascii=False)
@@ -130,6 +283,8 @@ def write_knowledge(
                     """,
                     (entry_id, key, content, meta_json, now, now),
                 )
+        # GBrain dual-write: best-effort, non-blocking
+        _gbrain_write(key, content, metadata=metadata)
         return entry_id
     except Exception as exc:
         print(f"[knowledge] write_knowledge failed for key={key}: {exc}", file=__import__('sys').stderr)
@@ -140,6 +295,7 @@ def read_knowledge(key: str, limit: int = 20) -> list[dict[str, Any]]:
     """Search knowledge entries by key prefix.
 
     Returns entries whose key starts with the given prefix, newest first.
+    Falls back to GBrain if local results are empty and GBrain is enabled.
     """
     try:
         with _DB_LOCK:
@@ -155,7 +311,14 @@ def read_knowledge(key: str, limit: int = 20) -> list[dict[str, Any]]:
                     """,
                     (f"{key}%", limit),
                 ).fetchall()
-        return [_row_to_dict(r) for r in rows]
+        local = [_row_to_dict(r) for r in rows]
+        if local:
+            return local
+        # GBrain fallback: try reading from deep memory
+        gbrain_results = _gbrain_read(key, limit=limit)
+        if gbrain_results:
+            return gbrain_results
+        return local
     except Exception as exc:
         print(f"[knowledge] read_knowledge failed for key={key}: {exc}", file=__import__('sys').stderr)
         raise
@@ -166,6 +329,9 @@ def search_knowledge(query: str, limit: int = 10) -> list[dict[str, Any]]:
 
     Returns entries whose *content* matches the query, ranked by relevance.
     Falls back to LIKE search if FTS5 is unavailable.
+
+    When GBrain is enabled, results are merged with GBrain hybrid search
+    results. GBrain results are appended with source='gbrain'.
     """
     try:
         with _DB_LOCK:
@@ -197,7 +363,23 @@ def search_knowledge(query: str, limit: int = 10) -> list[dict[str, Any]]:
                         """,
                         (f"%{query}%", f"%{query}%", limit),
                     ).fetchall()
-        return [_row_to_dict(r) for r in rows]
+        local_results = [_row_to_dict(r) for r in rows]
+
+        # GBrain hybrid search: merge with deep memory results
+        gbrain_results = _gbrain_search(query, limit=limit)
+
+        if not gbrain_results:
+            return local_results
+
+        # Merge: local first (session cache), then GBrain (deep memory)
+        # Deduplicate by key (local takes precedence)
+        seen_keys = set(r["key"] for r in local_results)
+        merged = list(local_results)
+        for gr in gbrain_results:
+            if gr["key"] not in seen_keys:
+                merged.append(gr)
+                seen_keys.add(gr["key"])
+        return merged[:limit]
     except Exception as exc:
         print(f"[knowledge] search_knowledge failed for query={query}: {exc}", file=__import__('sys').stderr)
         raise

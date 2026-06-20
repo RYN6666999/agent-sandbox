@@ -154,3 +154,67 @@ def test_verify_dangerous_input_escalates():
     body = r.json()
     assert body["status"] == "escalate"
     assert body["score"] == 0.0
+
+
+# ── /brain/consolidate (記憶固化) ────────────────────────────────────────────
+
+
+def test_consolidate_single_experience():
+    """單條經驗 → 回傳 ok + 1 條 gene。"""
+    r = client.post("/brain/consolidate", json={
+        "experiences": [
+            {"domain": "coding", "type": "bug-fix", "what": "settings.json executor 區塊不可刪除"}
+        ]
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert len(body["genes"]) == 1
+    assert body["genes"][0]["entry_id"] != ""
+
+
+def test_consolidate_multiple_experiences():
+    """多條經驗 → 全部寫入，回傳對應數量。"""
+    r = client.post("/brain/consolidate", json={
+        "experiences": [
+            {"domain": "architecture", "type": "decision", "what": "config-driven 比硬編碼好擴充"},
+            {"domain": "workflow", "type": "pattern", "what": "commit 前先問用戶確認"},
+        ]
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert len(body["genes"]) == 2
+
+
+def test_consolidate_with_fix():
+    """含 fix 的 bug-fix 經驗 → key 前綴正確。"""
+    r = client.post("/brain/consolidate", json={
+        "experiences": [
+            {
+                "domain": "debugging",
+                "type": "bug-fix",
+                "what": "settings.json 刪了 executors 導致 4 個 executor 消失",
+                "fix": "restore with git checkout origin/main",
+            }
+        ]
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert len(body["genes"]) == 1
+    assert body["genes"][0]["key"].startswith("gene/debugging/")
+
+
+def test_consolidate_empty_experiences_rejected():
+    """空 experiences 陣列 → 422。"""
+    r = client.post("/brain/consolidate", json={"experiences": []})
+    assert r.status_code == 422
+
+
+def test_consolidate_missing_fields_rejected():
+    """缺少 domain 或 what → 422。"""
+    r = client.post("/brain/consolidate", json={
+        "experiences": [{"type": "insight"}]
+    })
+    assert r.status_code == 422

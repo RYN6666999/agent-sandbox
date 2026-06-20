@@ -704,6 +704,49 @@ def knowledge_read(key: str, limit: int = 20):
     return {"entries": entries}
 
 
+# ── brain consolidation (記憶固化) ──────────────────────────────────────────
+
+
+class ConsolidateRequest(BaseModel):
+    experiences: list[dict] = []
+
+    @field_validator("experiences")
+    @classmethod
+    def experiences_not_empty(cls, v: list[dict]) -> list[dict]:
+        if not v:
+            raise ValueError("experiences must not be empty")
+        for i, exp in enumerate(v):
+            if "domain" not in exp or "what" not in exp:
+                raise ValueError(f"experience[{i}] requires 'domain' and 'what' fields")
+        return v
+
+
+class ConsolidateResponse(BaseModel):
+    ok: bool
+    genes: list[dict] = []
+    errors: list[str] = []
+
+
+@app.post("/brain/consolidate", response_model=ConsolidateResponse)
+def brain_consolidate(req: ConsolidateRequest):
+    """Consolidate session experiences into knowledge base genes.
+
+    Each experience should have:
+      - domain (str): coding|architecture|workflow|debugging|model-choice|tooling
+      - type (str): bug-fix|decision|insight|pattern|workflow
+      - what (str): description
+      - fix (str, optional): resolution (for bug-fix type)
+      - tags (list[str], optional)
+    """
+    from orchestrator.knowledge import ensure_schema, consolidate_experiences
+    ensure_schema()
+    try:
+        genes = consolidate_experiences(req.experiences)
+        return ConsolidateResponse(ok=True, genes=genes)
+    except Exception as e:
+        return ConsolidateResponse(ok=False, errors=[str(e)])
+
+
 # ── synchronous task execution ─────────────────────────────────────────────
 
 

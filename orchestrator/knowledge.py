@@ -232,3 +232,47 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         except (json.JSONDecodeError, TypeError):
             pass
     return d
+
+
+def consolidate_experiences(
+    experiences: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Batch-consolidate experiences into knowledge base as 'gene/' entries.
+
+    Each experience dict should have:
+      - domain (str): coding|architecture|workflow|debugging|model-choice|tooling
+      - type (str): bug-fix|decision|insight|pattern|workflow
+      - what (str): description of the experience
+      - fix (str, optional): what fixed it (for bug-fix type)
+
+    Returns list of {key, entry_id} for each successfully written gene.
+    """
+    results = []
+    for exp in experiences:
+        domain = exp.get("domain", "general")
+        exp_type = exp.get("type", "insight")
+        what = exp.get("what", "")
+        fix = exp.get("fix", "")
+
+        # Build content: what + fix if present
+        content = what
+        if fix:
+            content = f"{what}\n\nFix: {fix}"
+
+        # Build a short slug from the first ~50 chars of what
+        import re
+        slug = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fff]+', '-', what.strip()[:50]).strip('-').lower()[:40]
+        if not slug:
+            slug = f"experience-{uuid.uuid4().hex[:8]}"
+        gene_key = f"gene/{domain}/{slug}"
+
+        metadata = {
+            "domain": domain,
+            "type": exp_type,
+            "date": __import__('datetime').datetime.utcnow().strftime('%Y-%m-%d'),
+            "tags": exp.get("tags", []),
+        }
+
+        entry_id = write_knowledge(gene_key, content, metadata=metadata)
+        results.append({"key": gene_key, "entry_id": entry_id})
+    return results

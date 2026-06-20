@@ -33,8 +33,9 @@
 e41dda0 test: 新增端到端整合測試 — /task/make + /task/verify 9 項
 9002a33 docs: 同步 PROJECT.md + task_plan.md — 階段一完成、移除 TUI、重排優先序
 7291d54 sync: 對齊線上線下 — 新增 task_plan.md + military-skill-improvement.md
-────── 以下為 2026-06-20 session ──────
-[未 commit] feat: MCP 搜尋工具接入 — orchestrator/search.py + /search API + 18 項測試
+a19b6a8 feat: MCP 搜尋工具接入 + military-grade SDLC 協議
+57fb6e9 feat: Agnes 多模態 MCP 接入（P3）— 看圖/產圖/產影片
+b930d35 feat: Skill Bridge — 自動掛載 Claude CLI 17 個 executable skill
 ```
 
 ### 詳細成果
@@ -46,6 +47,22 @@ e41dda0 test: 新增端到端整合測試 — /task/make + /task/verify 9 項
    - `api/main.py` — 新增 `POST /search` + `GET /search?q=` 端點，回傳結構化結果（title/url/snippet）
    - `tests/test_search.py` — 18 項測試全過（parser 解析、mock HTTP、API 端點、CLI wrapper）
    - 遵循現有 executor registry pattern（與 claude-code / web-llm-genspark 一致）
+
+2. ✅ **Agnes 多模態 MCP（P3）**
+   - `orchestrator/agnes.py` — analyze_image / generate_image / generate_video / get_video_status
+   - `scripts/agnes-analyze.py / agnes-image.py / agnes-video.py` — CLI wrapper 各一
+   - `api/main.py` — POST /vision/analyze, /image/generate, /video/generate + GET /video/status/{id}
+   - `protocols/agnes-multimodal.md` — 多模態協議
+   - `tests/test_agnes.py` — 20 項測試全過
+   - 看圖支援 URL + base64，產影片非同步 polling
+
+3. ✅ **Skill Bridge（Session A）**
+   - `orchestrator/skill_bridge.py` — 掃描 .claude/skills/，從 210+ skill 發現 17 個 executable，註冊 33 個 executor
+   - `api/main.py` — POST /skill-bridge/scan 端點
+   - `protocols/skill-bridge.md` — 協議
+   - `tests/test_skill_bridge.py` — 9 項測試全過
+   - notebooklm 透過 run.py + --question flag 確保 venv 正確
+   - military-grade-workflow 等 .sh/.py 腳本自動掛載
 
 ---
 
@@ -94,9 +111,23 @@ Backlog: clarify_routing UI / headless / 沙箱
 
 ## 給接手的 Scream Code：下一步動作
 
-### 下一個任務：Agnes 多模態 MCP（P3）
+### 下一個任務：Session C — Scheduler（排程自動化）
 
-**目標**：將 Agnes 看圖/產圖/產影片能力掛成 MCP tool。需要 Agnes API key 和接線測試。| 之前已註冊為 executor（agnes-image, agnes-video），現在要掛到 MCP 層。
+**目標**：讓 AgentOS 能排程任務 — 「現在做這個，三小時後做那個，每天凌晨跑測試」。
+
+**提示（plan.md 已存）：**
+- 利用現有 Scream Code 的 CronCreate/CronDelete/CronList 工具
+- 寫 protocol 定義排程任務格式（cron expression + task spec）
+- `POST /schedule` 註冊 cron job
+- 每個 cron fire → 自動執行 task → 結果存 brain
+
+### 再下一棒：Session B — Model Router（成本控制）
+
+**目標**：根據任務類型 + 預算上限自動選模型。settings.json 可設 `max_budget_per_session: 0.50`。
+
+### 再下一棒：Session D — Auto-Consolidate（自我成長）
+
+**目標**：每次 `POST /task/verify` 完成後自動 call consolidate，從任務萃取 gene 存 brain。
 
 ### 紅線提醒
 
@@ -118,6 +149,16 @@ Backlog: clarify_routing UI / headless / 沙箱
 | `orchestrator/search.py` | 網頁搜尋核心模組（DuckDuckGo HTML 解析器，純 stdlib） |
 | `scripts/search-web.py` | 搜尋 CLI wrapper（executor registry subprocess 用） |
 | `tests/test_search.py` | 搜尋 18 項測試 |
+| `orchestrator/agnes.py` | Agnes 多模態核心（analyze_image / generate_image / generate_video） |
+| `orchestrator/skill_bridge.py` | Skill Bridge 掃描器（自動掛載 Claude skill → executor） |
+| `scripts/agnes-analyze.py` / `agnes-image.py` / `agnes-video.py` | Agnes CLI wrapper |
+| `protocols/search-web.md` | 搜尋協議 |
+| `protocols/agnes-multimodal.md` | 多模態協議 |
+| `protocols/military-grade-sdlc.md` | 軍規開發工作流協議 |
+| `protocols/skill-bridge.md` | Skill Bridge 協議 |
+| `tests/test_search.py` | 搜尋 18 項測試 |
+| `tests/test_agnes.py` | Agnes 20 項測試 |
+| `tests/test_skill_bridge.py` | Skill Bridge 9 項測試 |
 | `.scream-code/prompt-to-opus-review.md` | 給 Opus 的審查提示詞 |
 
 ### 腦庫已寫入的參考資料

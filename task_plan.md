@@ -1,7 +1,7 @@
 # AgentOS 推進規劃書
 
 > 基於 v3 架構（Scream 計劃+執行、Claude CLI 驗收、AgentOS 基礎設施）
-> 建立時間：2026-06-20 | 更新時間：2026-06-20 | 當前階段：階段一已完成，階段二啟動中
+> 建立時間：2026-06-20 | 更新時間：2026-06-20 | 當前階段：階段二已完成
 
 ---
 
@@ -17,48 +17,29 @@
 - [x] **executor registry** — register/get/list/run 四介面，三種 type（subprocess / super-engine / super-engine-warm）
 - [x] **super-engine** — Playwright 驅動 Brave，GenSpark 13-27s + Gemini daemon 2.3s 🔥
 - [x] **腦庫 SQLite+FTS5** — 19 項測試全過
-- [x] **協議模板庫** — 8 份 agent 交互提示詞
+- [x] **端到端測試** — test_e2e.py 14 項全過
+- [x] **記憶固化** — consolidate protocol + /brain/consolidate + 測試
+- [x] **協議模板庫** — 10+ 份協議（含 military-grade-sdlc、agnes-multimodal、skill-bridge）
 - [x] **Phase 5 實戰驗證** — `/task/make` + GenSpark ✅、`/task/verify` pass/fail ✅
-- [x] **Agnes image/video executors 接入** — agnes-image / agnes-video 正式註冊
-- [x] **文件同步** — PROJECT.md 階段狀態更新、TUI 決策反映、Backlog 重新排列
-- [x] **線上線下對齊** — settings.json 還原、本地新增檔 push 到遠端
+- [x] **MCP 搜尋工具接入** — DuckDuckGo HTML 解析器，純 stdlib，18 項測試 ✅
+- [x] **Agnes 多模態 MCP** — 看圖/產圖/產影片，4 API endpoints，20 項測試 ✅
+- [x] **Skill Bridge** — 自動掛載 Claude CLI 17 個 executable skill → 33 個 executor，9 項測試 ✅
 
 ---
 
-## 待辦（依優先序）
+## 下一棒（依優先序）
 
-### P0: 端到端整合測試 🎯 當前
+### Session C: Scheduler（排程自動化）🔜
 
-寫一隻 test script 同時測多條路徑，確保未來改動不 regression：
+讓 AgentOS 能排程任務 — 利用 Scream Code 的 CronCreate/CronDelete/CronList 工具。`POST /schedule` 端點，cron fire → 自動執行 task → 結果存 brain。
 
-| 測試 | 內容 | 預期 |
-|------|------|------|
-| `test_maker_super_engine` | POST /task/make → web-llm-genspark | output 非空 |
-| `test_verify_pytest_pass` | POST /task/verify + 正確 code | status=pass, score=10.0 |
-| `test_verify_pytest_fail` | POST /task/verify + buggy code | status=retry, score=2.0 |
-| `test_verify_no_test` | POST /task/verify + 純文字 | source=claude-cli |
+### Session B: Model Router（成本控制）
 
-### P1: 記憶固化執行
+根據任務類型 + 預算上限自動選模型。settings.json 可設 `max_budget_per_session: 0.50`。
 
-memory-consolidation-plan.md 已建立，待執行：
-- 從 session 經驗中萃取基因
-- 寫入腦庫作為永久知識
+### Session D: Auto-Consolidate（自我成長）
 
-### P2: MCP 搜尋工具接入 ✅ 已完成
-
-Roadmap 階段二的「第一個接搜尋工具」：
-- 研究 Scream Code 支援的 MCP server
-- 實作搜尋 executor，包裝成 executor registry 的一員
-
-### P3: Agnes 多模態 MCP 接入 ✅ 已完成
-
-Agnes 看圖/產圖/產影片能力掛成 MCP tool：
-- orchestrator/agnes.py — analyze_image / generate_image / generate_video / get_video_status
-- scripts/agnes-analyze.py / agnes-image.py / agnes-video.py — CLI wrapper
-- settings.json — 註冊 agnes-analyze / agnes-image / agnes-video executor
-- api/main.py — POST /vision/analyze, /image/generate, /video/generate + GET /video/status/{id}
-- tests/test_agnes.py — 20 項測試全過
-- protocols/agnes-multimodal.md — 多模態協議
+每次 `POST /task/verify` 完成後自動 call consolidate，從任務萃取 gene 存 brain。
 
 ---
 
@@ -84,9 +65,9 @@ Agnes 看圖/產圖/產影片能力掛成 MCP tool：
 ## 優先序一覽
 
 ```
-P0: 端到端測試（不寫 test 以後會後悔）
-P1: 記憶固化執行（計劃已就緒）
-P2: MCP search tool（讓 agent 能聯網）
-P3: Agnes 多模態 MCP
+階段二完成 🎉
+下一棒: Scheduler（排程自動化）
+再下一棒: Model Router（成本控制）
+再下一棒: Auto-Consolidate（自我成長）
 Backlog: clarify_routing UI / headless / 沙箱
 ```

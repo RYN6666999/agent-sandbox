@@ -228,13 +228,27 @@ Plan 階段必須固定以下三種停損，不可事後才補：
 - [x] **MCP 搜尋工具接入** — `orchestrator/search.py`（DuckDuckGo HTML 解析器，純 stdlib）、
       `scripts/search-web.py`（CLI wrapper，註冊為 subprocess executor）、
       `POST/GET /search` API 端點、18 項測試全過
+- [x] **Agnes 多模態 MCP 接入** — `orchestrator/agnes.py`（analyze_image / generate_image / generate_video）、
+      `scripts/agnes-analyze/agnese-image/agnes-video.py`（CLI wrapper 各一）、
+      `POST /vision/analyze, /image/generate, /video/generate + GET /video/status` API、
+      20 項測試全過
+- [x] **Skill Bridge — 自動掛載 Claude Skill** — `orchestrator/skill_bridge.py`（掃描 .claude/skills/）、
+      從 210+ skill 中發現 17 個 executable、自動註冊 33 個 executor、
+      `POST /skill-bridge/scan` API、9 項測試全過
 
-待做（Backlog）：
-- [ ] 端到端整合測試（test_maker_super_engine、test_verify_pytest_pass/fail/no-test）
-- [ ] MCP 搜尋工具接入（Roadmap 階段二）
-- [ ] frontend clarify_routing UI（後端已完成，前端 A/B 問答尚未實作）。
-- [ ] Agnes 多模態 MCP 接入（D18，roadmap 階段二）。
-- [ ] super-engine headless 模式（GenSpark 安全偵測繞過）
+### 已完成 Backlog（移至完成區）
+- [x] 端到端整合測試（test_e2e.py 14 項全過）
+- [x] MCP 搜尋工具接入（階段二）
+- [x] Agnes 多模態 MCP 接入（階段二）
+
+### 下一棒
+- Session C: Scheduler（排程自動化）🔜
+- Session B: Model Router（成本控制）
+- Session D: Auto-Consolidate（自我成長）
+
+### 擱置 Backlog
+- frontend clarify_routing UI（React desktop 已廢棄，TUI 也不做）
+- super-engine headless（GenSpark 封鎖 headless，繞過成本高）
 
 ---
 
@@ -245,9 +259,11 @@ Plan 階段必須固定以下三種停損，不可事後才補：
 Scream 自己寫 code、跑測試、判斷何時交付；Claude CLI 負責客觀驗收（真跑 pytest）。
 三個必須觀察的指標已全部通過：Scream 能獨立完成任務（Phase 5 實戰驗證）、Claude CLI 真實驗收（pass/fail 正確判定）、失敗真實回退（score=2.0 + error feedback）。
 
-### 階段二：架構插槽落地
+### 階段二：架構插槽落地（已完成 ✅）
 - 腦庫：接上真實 SQLite 儲存層 + 統一讀寫介面（`read_knowledge` / `write_knowledge`）。
-- MCP：從寫死的工具升級為可註冊、可擴充的工具層；第一個接搜尋工具（解決 agent 不能聯網）。
+- MCP 搜尋工具：DuckDuckGo HTML 解析器，純 stdlib，18 項測試 ✅
+- Agnes 多模態 MCP：看圖/產圖/產影片，4 API endpoints，20 項測試 ✅
+- Skill Bridge：自動掛載 Claude CLI 17 個 executable skill，9 項測試 ✅
 
 ### 階段三：多 agent 擴展
 在 Scream + Claude CLI 之外加入更多專長角色（檢索、規劃、驗證…），

@@ -112,7 +112,7 @@
 - **Claude CLI** 是驗收角色，只在需要真實驗收時被 Scream 調用，不寫 code。
 - **Opus 4.8** 是顧問，選用執行路徑，Scream 遇到架構難題時才諮詢。
 - **Gemini（super-engine）** 是小雜工（僅文字），負責摘要、分類、格式轉換等廉價任務。
-- **Agnes** 是多模態工具（看圖、產圖、產影片），補 Gemini 的文字-only 缺口。目前作為 converse 閒聊預設模型。其 image/video 系列尚未整合為 executor。
+- **Agnes** 是多模態工具（看圖、產圖、產影片），補 Gemini 的文字-only 缺口。目前作為 converse 閒聊預設模型。其 image/video 系列已整合為 executor（agnes-image, agnes-video）。
 - **腦庫**是底層共用資源（記憶），所有 agent 透過統一介面讀寫，不直接碰資料庫。
 - **MCP**是工具接入層（手腳），agent 透過它對外。
 - **MCP 工具的調用必須經過 safety gate 與 audit log**，不可繞過。
@@ -129,7 +129,7 @@
 | 資料結構 | Pydantic | TaskSpec 等契約定義 |
 | 儲存 | SQLite | 審計日誌 + 腦庫（MVP 階段不用 Postgres） |
 | 工具接入 | MCP | agent 的 tool-calling 與外部工具 |
-| 前端 | React (earth-tone UI) | 聊天 / 任務介面（⚠️ 評估中：可能改用 TUI） |
+| 前端 | React (earth-tone UI) | 聊天 / 任務介面（已決定捨棄 TUI，以 API + shell client 為主） |
 | Web LLM | super-engine (Playwright + Brave) | Gemini 免費版 / GenSpark(Opus) 兩條線路 |
 | executor registry | orchestrator/executor_registry.py | register/get/list_all/run（支援 subprocess + super-engine + super-engine-warm）|
 | super-engine daemon | super-engine/ask-daemon.ts | Keep-warm HTTP server，瀏覽器常駐，~2s 回應 Gemini |
@@ -220,22 +220,27 @@ Plan 階段必須固定以下三種停損，不可事後才補：
       task-breakdown / progress-report / write-protocol），
       shell client 支援（protocol list / show / push），可推送到腦庫
 - [x] **測試覆蓋**：188+ tests（pytest），涵蓋 API、registry、super-engine、safety、blackboard、knowledge
+- [x] **Phase 5 實戰驗證** — `/task/make` + GenSpark 13.5s 正常回應 ✅、
+      `/task/verify` + pytest pass (10.0) / fail (2.0 + feedback) ✅、
+      maker.py executor routing 修正 ✅
+- [x] **Agnes 多模態 executors 接入** — agnes-image（agnes-image-2.1-flash）、
+      agnes-video（agnes-video-v2.0）正式註冊為 executor
 
 待做（Backlog）：
+- [ ] 端到端整合測試（test_maker_super_engine、test_verify_pytest_pass/fail/no-test）
+- [ ] MCP 搜尋工具接入（Roadmap 階段二）
 - [ ] frontend clarify_routing UI（後端已完成，前端 A/B 問答尚未實作）。
 - [ ] Agnes 多模態 MCP 接入（D18，roadmap 階段二）。
-- [ ] **AgentOS TUI** — 取代 React desktop app，用 terminal UI（參考 GASP skill 設計）
-- [ ] **GASP skill 研究** — https://github.com/Arvincreator/project-golem（Browser-in-the-Loop 架構參考）
 - [ ] super-engine headless 模式（GenSpark 安全偵測繞過）
 
 ---
 
 ## 六、路線圖 (Roadmap)
 
-### 階段一：核心細胞驗證（現在）
+### 階段一：核心細胞驗證（已完成 ✅）
 證明 **Scream 直接執行 → Claude CLI 驗收** 循環能收斂並交付可用成果。
 Scream 自己寫 code、跑測試、判斷何時交付；Claude CLI 負責客觀驗收（真跑 pytest）。
-三個必須觀察的指標：Scream 能獨立完成任務、Claude CLI 真實驗收、失敗真實回退。
+三個必須觀察的指標已全部通過：Scream 能獨立完成任務（Phase 5 實戰驗證）、Claude CLI 真實驗收（pass/fail 正確判定）、失敗真實回退（score=2.0 + error feedback）。
 
 ### 階段二：架構插槽落地
 - 腦庫：接上真實 SQLite 儲存層 + 統一讀寫介面（`read_knowledge` / `write_knowledge`）。

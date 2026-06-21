@@ -1,6 +1,6 @@
 """Shared blackboard backed by .sdd/ directory. All agents read/write here."""
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 SDD = Path(__file__).parent.parent / ".sdd"
@@ -8,7 +8,7 @@ SDD.mkdir(exist_ok=True)
 
 
 def write(key: str, data: dict) -> Path:
-    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     path = SDD / f"{key}_{ts}.json"
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
     return path

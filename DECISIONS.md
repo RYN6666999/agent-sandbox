@@ -164,3 +164,27 @@
 - **否決 / 邊界**：否決「繼續讓 AgentOS 當 maker proxy」— 基礎設施不該有執行職責。否決「Opus 當 maker_model」— 顧問採選用執行路徑。
 - **影響範圍**：PROJECT.md / ARCHITECTURE.md / README.md 核心敘事全面更新；data/settings.json 的 maker_model 欄位改為非主要路徑但保留可用，作為參考用途；maker.py / loop.py 的程式碼保留不動，僅更新註解。
 - **可推翻條件**：若 Scream Code 環境無法勝任執行角色，可重回 AgentOS maker proxy 模式，但屆時 maker_model 不應指向顧問角色。
+
+---
+
+## D24. executor registry 內建 executor 必須在模組載入時自動注冊（Bug Fix）
+
+- **決策**：`web-search`、`agnes-analyze`、`agnes-image`、`agnes-video` 四個 executor 改為在 `orchestrator/executor_registry.py` 的 `_BUILTIN_EXECUTORS` dict 中靜態定義，與 `claude-code` 並列，在 module import 時透過 `_init()` 自動注冊。使用 `sys.executable` 作為 binary，確保跨虛擬環境正確指向當前 Python。
+- **為什麼**：v3 實作中四個 executor 只有定義 `scripts/` 下的 CLI wrapper，但 `executor_registry` 的 `_init()` 只讀取 `settings.json` 的 `executors` 欄位；`settings.json` 的 `executors` 欄位是空的。結果所有呼叫 `executor_registry.run("web-search", ...)` 都會拋出 `KeyError`，`/search`、`/vision/analyze` 等 API 端點實際上全部損壞。測試也因此失敗（`test_executors_includes_web_search`、`test_executors_includes_agnes`）。
+- **根本原因**：v3 重構時將 executor 從 `settings.json` 的動態設定改為程式碼內建，但忘記同步把它們加進 `_BUILTIN_EXECUTORS`，產生「有 wrapper、無注冊」的死角。
+- **否決**：否決「在 `settings.json` 裡手動補 executors 欄位」— 設定檔是執行期覆寫用的，不是定義內建行為的地方；否決「在 API startup hook 呼叫注冊」— module-level 注冊更可預期，測試也更容易驗證。
+- **邊界**：`settings.json` 的 `executors` 欄位仍可用於覆寫內建 executor 的參數（如 timeout、model）或注冊額外的自訂 executor（如 `web-llm-genspark`），不衝突。
+- **可推翻條件**：若未來改用 plugin 機制或 TOML 設定管理 executor，可重新評估注冊時機。
+
+## D25. 測試程式碼必須與架構決策同步更新（測試債記錄）
+
+- **決策**：確立原則：每次重構刪除/改名 production 函式，**同一個 commit 必須同步更新受影響的測試**。本次發現 16 個失敗測試，全部是「測試追著舊架構跑」的遺留問題，不是 production code 有 bug。
+- **為什麼**：v3 重構刪除了 `_llm_score`（D1 決策），改名了 `run` → `run_verification`（loop.py），改了 `/models` 回傳格式，但對應測試沒跟上，形成「假失敗」。假失敗比沒測試更危險——它讓 CI 失去可信度，讓維護者分不清「真 bug」和「舊測試」。
+- **分類整理（5 類測試債）**：
+  1. `_llm_score` / `_llm_check` patch — 已隨 D1 刪除，改 patch `_claude_cli_check`
+  2. `run_loop` patch — v3 改名為 `run_verification`，測試未跟
+  3. executor 注冊缺失 — `web-search` / `agnes-*` 未注冊，測試先發現
+  4. `/models` 格式 — 從 `{"models":[]}` 改為 `{"free":[],"paid":[]}` 後測試未更新
+  5. 環境依賴測試 — `test_scan_finds_real_skills` 要求本機有 `~/.claude/skills/`，沙箱/CI 應 `pytest.skip`
+- **否決**：否決「只刪掉失敗測試」— 測試是規格文件，應改寫讓它測試正確的行為，而非消失。
+- **邊界**：環境依賴測試（需要特定本機工具、帳號、設備）必須加 `pytest.skip` 條件，不得無條件執行。

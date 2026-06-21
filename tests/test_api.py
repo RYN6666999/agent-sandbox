@@ -211,9 +211,12 @@ def test_models_returns_list():
     r = client.get("/models")
     assert r.status_code == 200
     body = r.json()
-    assert "models" in body
-    assert isinstance(body["models"], list)
-    assert len(body["models"]) > 0
+    # API 回傳 {"free": [...], "paid": [...]} 兩個分層（非舊的 {"models": [...]} 格式）
+    assert "free" in body
+    assert "paid" in body
+    assert isinstance(body["free"], list)
+    assert isinstance(body["paid"], list)
+    assert len(body["paid"]) > 0  # paid 模型（agnes/claude/gemini 等）永遠非空
 
 
 # ── /task/run (Scream client sync endpoint) ─────────────────────────────────
@@ -233,14 +236,9 @@ def test_task_run_invalid_executor():
 
 
 def test_task_run_success():
-    """Mock loop.run to return success without langgraph."""
-    with patch("api.main.run_loop") as mock_loop_run:
-        mock_loop_run.return_value = {
-            "status": "done",
-            "output": "def hello(): pass",
-            "rounds": 1,
-            "final_score": 8.0,
-        }
+    """/task/run 成功路徑：mock run_maker 回傳輸出字串。"""
+    with patch("api.main.run_maker") as mock_maker:
+        mock_maker.return_value = "def hello(): pass"
         r = client.post("/task/run", json={"task": "write hello function"})
     assert r.status_code == 200
     body = r.json()
@@ -250,8 +248,8 @@ def test_task_run_success():
 
 def test_task_run_executor_sets_spec():
     """executor=claude-code 讓 spec.executor 被設為 claude-code。"""
-    with patch("api.main.run_loop") as mock_loop_run:
-        mock_loop_run.return_value = {"status": "done", "output": "", "rounds": 1}
+    with patch("api.main.run_maker") as mock_maker:
+        mock_maker.return_value = ""
         client.post("/task/run", json={"task": "debug bug", "executor": "claude-code"})
-        called_spec = mock_loop_run.call_args[0][0]
+        called_spec = mock_maker.call_args[0][0]
         assert called_spec.executor == "claude-code"

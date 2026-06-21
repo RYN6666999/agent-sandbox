@@ -75,8 +75,14 @@ def test_scan_skips_real_nonscript_dirs():
 
 
 def test_scan_finds_real_skills():
-    """實際掃描 → 找到 notebooklm 等技能。"""
-    from orchestrator.skill_bridge import scan
+    """實際掃描 → 找到 notebooklm 等技能（需要本機有 ~/.claude/skills/notebooklm/）。"""
+    import pytest
+    from orchestrator.skill_bridge import CLAUDE_SKILLS_DIR, scan
+
+    # 本測試依賴本機已安裝的 Claude skills，沙箱/CI 環境跳過
+    if not CLAUDE_SKILLS_DIR.exists():
+        pytest.skip(f"Claude skills dir not found: {CLAUDE_SKILLS_DIR}")
+
     result = scan(force=True)
     skills = result["skills"]
     # notebooklm should be there (it's installed and has scripts/)

@@ -21,102 +21,90 @@ def make_spec(**kwargs) -> TaskSpec:
     return TaskSpec(**{**defaults, **kwargs})
 
 
-# ── Checker unit tests (no LLM) ──────────────────────────────────────────
+# ── Checker unit tests (v3: text/code → _claude_cli_check) ───────────────
 
-def test_checker_keyword_miss_fails_immediately():
+def test_checker_text_output_delegates_to_claude_cli():
+    """v3: 文字輸出（非程式碼）→ _claude_cli_check，score 由 claude-cli 決定。"""
+    from orchestrator.checker import CheckResult as CR
     spec = make_spec()
-    # output has nothing resembling "cashflow" or "9000"
-    result = check(spec, "hello world", prev_score=None)
+    fake = CR(passed=False, score=2.0, feedback="[CLAUDE-CLI] incomplete", source="claude-cli")
+    with patch("orchestrator.checker._claude_cli_check", return_value=fake):
+        result = check(spec, "hello world", prev_score=None)
     assert not result.passed
-    assert result.score == 0.0
-    assert "missing expected keywords" in result.feedback
+    assert result.source == "claude-cli"
 
 
-def test_checker_boundary_violation_fails():
+def test_checker_code_without_tests_delegates_to_claude_cli():
+    """v3: 有程式碼但無測試 → _claude_cli_check（不直接跑 pytest）。"""
+    from orchestrator.checker import CheckResult as CR
     spec = make_spec()
-    result = check(spec, "cashflow=9000 including tax calculation", prev_score=None)
+    impl_only = "cashflow=9000 including tax calculation"
+    fake = CR(passed=False, score=3.0, feedback="[CLAUDE-CLI] boundary check", source="claude-cli")
+    with patch("orchestrator.checker._claude_cli_check", return_value=fake):
+        result = check(spec, impl_only, prev_score=None)
     assert not result.passed
-    assert any("boundary" in v for v in result.violations)
+    assert result.source == "claude-cli"
 
 
-def test_checker_no_progress_detected():
+def test_checker_claude_cli_pass():
+    """v3: claude-cli 回傳 score >= 7.0 → passed=True。"""
+    from orchestrator.checker import CheckResult as CR
     spec = make_spec()
-    # Mock LLM to return score 6.0 (below 7.0 threshold)
-    with patch("orchestrator.checker._llm_score", return_value=(6.0, "needs improvement")):
-        result1 = check(spec, "cashflow=9000", prev_score=5.8)
-    # delta = 6.0 - 5.8 = 0.2 < 0.5 → no_progress flag
-    assert "[no progress]" in result1.feedback
-    assert not result1.passed
-
-
-def test_checker_pass_when_score_high():
-    spec = make_spec()
-    with patch("orchestrator.checker._llm_score", return_value=(8.5, "looks good")):
-        result = check(spec, "cashflow=9000 breakdown: rent 30000 mortgage 18000", prev_score=None)
+    fake = CR(passed=True, score=8.5, feedback="[CLAUDE-CLI] looks good", source="claude-cli")
+    with patch("orchestrator.checker._claude_cli_check", return_value=fake):
+        result = check(spec, "cashflow=9000 breakdown: rent 30000", prev_score=None)
     assert result.passed
     assert result.score == 8.5
 
 
-# ── Loop stop-condition tests (mock maker + checker) ─────────────────────
-
-def _mock_make(score_sequence: list[float]):
-    """Returns a make() mock + checker mock that yields scores in sequence."""
-    call_count = {"n": 0}
-
-    def fake_make(spec, feedback="", round_n=1, on_token=None):
-        return f"cashflow=9000 round={round_n}"
-
-    def fake_check(spec, output, prev_score=None):
-        idx = call_count["n"]
-        call_count["n"] += 1
-        score = score_sequence[min(idx, len(score_sequence) - 1)]
-        passed = score >= 7.0
-        return CheckResult(passed=passed, score=score, feedback=f"score={score}")
-
-    return fake_make, fake_check
+def test_checker_claude_cli_fail():
+    """v3: claude-cli 回傳 score < 7.0 → passed=False。"""
+    from orchestrator.checker import CheckResult as CR
+    spec = make_spec()
+    fake = CR(passed=False, score=6.0, feedback="[CLAUDE-CLI] needs improvement", source="claude-cli")
+    with patch("orchestrator.checker._claude_cli_check", return_value=fake):
+        result = check(spec, "cashflow=9000", prev_score=5.8)
+    assert not result.passed
+    assert result.score == 6.0
 
 
-def test_loop_passes_on_high_score():
-    from orchestrator.loop import run
+# ── run_verification stop-condition tests (v3 loop) ───────────────────────
+# v3 的 loop.py 只有 run_verification()，沒有 run()。
+# run_verification 做一次 check → 回傳 pass/retry/escalate。
+
+def test_verification_passes_on_high_score():
+    """pytest pass (score=10.0) → status=pass。"""
+    from orchestrator.checker import CheckResult as CR
     spec = make_spec(max_rounds=5)
-    fake_make, fake_check = _mock_make([8.0])
-    with patch("orchestrator.loop.make", fake_make), \
-         patch("orchestrator.loop.check", fake_check):
-        result = run(spec)
-    assert result["status"] == "done"
-    assert result["rounds"] == 1
+    fake = CR(passed=True, score=10.0, feedback="[PYTEST] 1 passed", source="pytest")
+    with patch("orchestrator.loop.check", return_value=fake):
+        from orchestrator.loop import run_verification
+        result = run_verification(spec, "def test_x(): assert True")
+    assert result["status"] == "pass"
+    assert result["passed"] is True
 
 
-def test_loop_escalates_on_max_rounds():
-    from orchestrator.loop import run
-    spec = make_spec(max_rounds=3)
-    fake_make, fake_check = _mock_make([4.0, 4.2, 4.3])  # never reaches 7.0
-    with patch("orchestrator.loop.make", fake_make), \
-         patch("orchestrator.loop.check", fake_check):
-        result = run(spec)
-    assert result["status"] == "escalate"
-
-
-def test_loop_escalates_on_no_progress_streak():
-    from orchestrator.loop import run
-    spec = make_spec(max_rounds=10)
-    # score barely moves → no_progress_streak hits 2
-    fake_make, fake_check = _mock_make([5.0, 5.1, 5.2])
-    with patch("orchestrator.loop.make", fake_make), \
-         patch("orchestrator.loop.check", fake_check):
-        result = run(spec)
-    assert result["status"] == "escalate"
-
-
-def test_loop_retries_before_passing():
-    from orchestrator.loop import run
+def test_verification_retries_on_low_score():
+    """pytest fail (score=2.0) → status=retry。"""
+    from orchestrator.checker import CheckResult as CR
     spec = make_spec(max_rounds=5)
-    fake_make, fake_check = _mock_make([4.0, 5.5, 8.0])  # pass on round 3
-    with patch("orchestrator.loop.make", fake_make), \
-         patch("orchestrator.loop.check", fake_check):
-        result = run(spec)
-    assert result["status"] == "done"
-    assert result["rounds"] == 3
+    fake = CR(passed=False, score=2.0, feedback="[PYTEST] 1 failed", source="pytest")
+    with patch("orchestrator.loop.check", return_value=fake):
+        from orchestrator.loop import run_verification
+        result = run_verification(spec, "bad code")
+    assert result["status"] == "retry"
+    assert result["passed"] is False
+
+
+def test_verification_escalates_on_zero_score():
+    """score=0.0（timeout/env error）→ status=escalate。"""
+    from orchestrator.checker import CheckResult as CR
+    spec = make_spec(max_rounds=5)
+    fake = CR(passed=False, score=0.0, feedback="[PYTEST] timed out", source="pytest")
+    with patch("orchestrator.loop.check", return_value=fake):
+        from orchestrator.loop import run_verification
+        result = run_verification(spec, "")
+    assert result["status"] == "escalate"
 
 
 # ── Blackboard ────────────────────────────────────────────────────────────

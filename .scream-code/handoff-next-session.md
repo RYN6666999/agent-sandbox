@@ -72,8 +72,8 @@ b930d35 feat: Skill Bridge — 自動掛載 Claude CLI 17 個 executable skill
 
 - executor registry（register/get/list/run，三種 type）
 - super-engine（Playwright + Brave，GenSpark 13-27s / Gemini 2.3s）
-- 腦庫 SQLite+FTS5（19 項測試）
-- 協議模板庫（9 份協議）
+- 腦庫 SQLite+FTS5（22 項測試）
+- 協議模板庫（13 份協議）
 - Checker 真跑 pytest
 - safety gate / clarify gate
 - Phase 5 實戰驗證通過
@@ -82,6 +82,8 @@ b930d35 feat: Skill Bridge — 自動掛載 Claude CLI 17 個 executable skill
 - MCP 搜尋工具（web-search executor + /search API + 18 項測試）
 - Agnes 多模態 MCP（agnes-analyze / agnes-image / agnes-video executors + 4 API endpoints + 20 項測試）
 - Skill Bridge（自動掛載 Claude CLI 17 個 executable skill → 33 個 executor + 掃描 API + 9 項測試）
+- **Session C Scheduler（自修復迴圈閉環）** — task_queue + runner（三停六分支）+ inspector（A 巡檢器）+ B 佇列 API（/queue/*）+ Trigger 心跳 daemon（heartbeat.py）。系統會自己跑了。
+- **全測試通過：340 passed（20 個測試檔）**
 
 ### 待辦（依優先序）
 
@@ -93,10 +95,11 @@ b930d35 feat: Skill Bridge — 自動掛載 Claude CLI 17 個 executable skill
   P3: Agnes 多模態 MCP ✅
   Session A: Skill Bridge ✅
   ──────────── Roadmap 階段二完成 🎉
+  Session C: Scheduler（排程自動化）✅ — 自修復迴圈閉環
+  ──────────── Session C 完成 🎉
 
 下一個:
-  Session C: Scheduler（排程自動化）🔜
-  Session B: 成本 Model Router
+  Session B: 成本 Model Router 🔜
   Session D: 自動學習
 
 Backlog: clarify_routing UI / headless / 沙箱
@@ -111,17 +114,16 @@ Backlog: clarify_routing UI / headless / 沙箱
 
 ## 給接手的 Scream Code：下一步動作
 
-### 下一個任務：Session C — Scheduler（排程自動化）
+### 已完成：Session C — Scheduler（排程自動化）✅
 
-**目標**：讓 AgentOS 能排程任務 — 「現在做這個，三小時後做那個，每天凌晨跑測試」。
+自修復迴圈已閉環，系統會自己跑：
+- `orchestrator/task_queue.py` — SQLite 佇列 + 狀態機 + cost_ledger 持久化油表
+- `orchestrator/runner.py` — `run_loop()` 三停六分支
+- `orchestrator/inspector.py` — A 巡檢器：跑本地 pytest，失敗去重後產任務入佇列
+- `orchestrator/heartbeat.py` — Trigger 心跳 daemon（`python -m orchestrator.heartbeat`）
+- B 佇列 API：`/queue/push`、`/queue/status`、`/queue/list`、`/queue/task/{id}`
 
-**提示（plan.md 已存）：**
-- 利用現有 Scream Code 的 CronCreate/CronDelete/CronList 工具
-- 寫 protocol 定義排程任務格式（cron expression + task spec）
-- `POST /schedule` 註冊 cron job
-- 每個 cron fire → 自動執行 task → 結果存 brain
-
-### 再下一棒：Session B — Model Router（成本控制）
+### 下一個任務：Session B — Model Router（成本控制）🔜
 
 **目標**：根據任務類型 + 預算上限自動選模型。settings.json 可設 `max_budget_per_session: 0.50`。
 
@@ -144,7 +146,11 @@ Backlog: clarify_routing UI / headless / 沙箱
 | `orchestrator/knowledge.py` | 腦庫儲存層（含 consolidate_experiences） |
 | `orchestrator/model_registry.py` | 模型 alias 映射 |
 | `data/settings.json` | 執行期設定（含 executors 定義） |
-| `protocols/` | 9 份協議模板 |
+| `protocols/` | 13 份協議模板 |
+| `orchestrator/task_queue.py` | SQLite 佇列 + 狀態機 + cost_ledger 油表 |
+| `orchestrator/runner.py` | `run_loop()` 三停六分支 |
+| `orchestrator/inspector.py` | A 巡檢器（跑 pytest，失敗去重產任務） |
+| `orchestrator/heartbeat.py` | Trigger 心跳 daemon（喚醒 inspector + runner） |
 | `tests/test_e2e.py` | 端到端測試（mock pattern 參考） |
 | `orchestrator/search.py` | 網頁搜尋核心模組（DuckDuckGo HTML 解析器，純 stdlib） |
 | `scripts/search-web.py` | 搜尋 CLI wrapper（executor registry subprocess 用） |

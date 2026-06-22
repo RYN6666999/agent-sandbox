@@ -1,7 +1,7 @@
 # AgentOS 推進規劃書
 
 > 基於 v3 架構（Scream 計劃+執行、Claude CLI 驗收、AgentOS 基礎設施）
-> 建立時間：2026-06-20 | 更新時間：2026-06-20 | 當前階段：階段二已完成
+> 建立時間：2026-06-20 | 更新時間：2026-06-22 | 當前階段：Session C Scheduler 完成（自修復迴圈閉環）
 
 ---
 
@@ -16,7 +16,7 @@
 - [x] **v3 架構完整實作** — Scream 計劃+執行、Claude CLI 驗收、AgentOS 基礎設施
 - [x] **executor registry** — register/get/list/run 四介面，三種 type（subprocess / super-engine / super-engine-warm）
 - [x] **super-engine** — Playwright 驅動 Brave，GenSpark 13-27s + Gemini daemon 2.3s 🔥
-- [x] **腦庫 SQLite+FTS5** — 19 項測試全過
+- [x] **腦庫 SQLite+FTS5** — 22 項測試全過
 - [x] **端到端測試** — test_e2e.py 14 項全過
 - [x] **記憶固化** — consolidate protocol + /brain/consolidate + 測試
 - [x] **協議模板庫** — 10+ 份協議（含 military-grade-sdlc、agnes-multimodal、skill-bridge）
@@ -24,16 +24,14 @@
 - [x] **MCP 搜尋工具接入** — DuckDuckGo HTML 解析器，純 stdlib，18 項測試 ✅
 - [x] **Agnes 多模態 MCP** — 看圖/產圖/產影片，4 API endpoints，20 項測試 ✅
 - [x] **Skill Bridge** — 自動掛載 Claude CLI 17 個 executable skill → 33 個 executor，9 項測試 ✅
+- [x] **Session C Scheduler（自修復迴圈閉環）** — task_queue + runner（三停六分支）+ A 巡檢器 + B 佇列 API（`/queue/*`）+ Trigger 心跳 daemon（`heartbeat.py`）。系統會自己跑了。
+- [x] **全測試通過** — 340 passed（20 個測試檔）
 
 ---
 
 ## 下一棒（依優先序）
 
-### Session C: Scheduler（排程自動化）🔜
-
-讓 AgentOS 能排程任務 — 利用 Scream Code 的 CronCreate/CronDelete/CronList 工具。`POST /schedule` 端點，cron fire → 自動執行 task → 結果存 brain。
-
-### Session B: Model Router（成本控制）
+### Session B: Model Router（成本控制）🔜
 
 根據任務類型 + 預算上限自動選模型。settings.json 可設 `max_budget_per_session: 0.50`。
 
@@ -65,9 +63,8 @@
 ## 優先序一覽
 
 ```
-階段二完成 🎉
-下一棒: Scheduler（排程自動化）
-再下一棒: Model Router（成本控制）
+階段二完成 🎉  Session C Scheduler 完成 🎉（自修復迴圈閉環）
+下一棒: Model Router（成本控制）
 再下一棒: Auto-Consolidate（自我成長）
 Backlog: clarify_routing UI / headless / 沙箱
 ```

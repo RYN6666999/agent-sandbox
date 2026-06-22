@@ -236,9 +236,10 @@ def test_task_run_invalid_executor():
 
 
 def test_task_run_success():
-    """/task/run 成功路徑：mock run_maker 回傳輸出字串。"""
+    """/task/run 成功路徑：mock run_maker 回傳 MakeResult。"""
+    from orchestrator.maker import MakeResult
     with patch("api.main.run_maker") as mock_maker:
-        mock_maker.return_value = "def hello(): pass"
+        mock_maker.return_value = MakeResult.from_subprocess("def hello(): pass")
         r = client.post("/task/run", json={"task": "write hello function"})
     assert r.status_code == 200
     body = r.json()
@@ -248,8 +249,9 @@ def test_task_run_success():
 
 def test_task_run_executor_sets_spec():
     """executor=claude-code 讓 spec.executor 被設為 claude-code。"""
+    from orchestrator.maker import MakeResult
     with patch("api.main.run_maker") as mock_maker:
-        mock_maker.return_value = ""
+        mock_maker.return_value = MakeResult.from_subprocess("")
         client.post("/task/run", json={"task": "debug bug", "executor": "claude-code"})
         called_spec = mock_maker.call_args[0][0]
         assert called_spec.executor == "claude-code"

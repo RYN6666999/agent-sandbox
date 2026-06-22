@@ -14,6 +14,7 @@ No internal loop/retry logic — Scream controls iteration externally.
 """
 import json
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -37,6 +38,43 @@ _BASE_PROMPT = (
     "No extra commentary unless the task requires it."
 )
 
+# DeepSeek V4 Flash 單價（USD per 1M tokens，供 runner 層累加使用）
+PRICE_INPUT_PER_M = 0.09
+PRICE_OUTPUT_PER_M = 0.18
+
+
+@dataclass
+class MakeResult:
+    """make() 的回傳值。
+
+    output     — 模型（或 executor）的文字輸出
+    prompt_tokens     — 輸入 token 數；subprocess 路徑填 0
+    completion_tokens — 輸出 token 數；subprocess 路徑填 0
+    cost_usd   — 本次呼叫成本（USD）；根據 V4 Flash 單價計算
+    cost_known — False 表示走 subprocess 路徑，無法取得真實 token，
+                 runner 層不應將此次成本計入全局油表
+    """
+    output: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cost_usd: float = 0.0
+    cost_known: bool = True
+
+    @classmethod
+    def from_subprocess(cls, output: str) -> "MakeResult":
+        """subprocess / executor_registry 路徑：token 未知，cost_known=False。"""
+        return cls(output=output, prompt_tokens=0, completion_tokens=0,
+                   cost_usd=0.0, cost_known=False)
+
+    @classmethod
+    def from_usage(cls, output: str, prompt_tokens: int, completion_tokens: int) -> "MakeResult":
+        """litellm 路徑：用 V4 Flash 單價計算本次成本。"""
+        cost = (prompt_tokens / 1_000_000 * PRICE_INPUT_PER_M
+                + completion_tokens / 1_000_000 * PRICE_OUTPUT_PER_M)
+        return cls(output=output, prompt_tokens=prompt_tokens,
+                   completion_tokens=completion_tokens,
+                   cost_usd=cost, cost_known=True)
+
 
 def _load_settings() -> dict:
     if SETTINGS_PATH.exists():
@@ -49,16 +87,20 @@ def _load_settings() -> dict:
 
 def make(spec: TaskSpec, *, on_token: Callable[[str], None] | None = None,
          request_id: str | None = None,
-         session_id: str | None = None) -> str:
+         session_id: str | None = None) -> MakeResult:
     """AgentOS route-to-executor action. Routes through executor_registry for non-litellm executors.
-        In v3, Scream calls LLM directly — this is AgentOS's own action loop routing, not a maker proxy."""
+        In v3, Scream calls LLM directly — this is AgentOS's own action loop routing, not a maker proxy.
+
+    Returns MakeResult (output + usage + cost).  cost_known=False on subprocess paths.
+    """
     executor = spec.executor or "litellm"
 
     # Route registered executors through executor_registry
     if executor != "litellm" and executor_registry.get(executor):
         prompt = _build_prompt(spec, executor)
         _record_maker_event(request_id, session_id, executor, spec.why[:200])
-        return executor_registry.run(executor, prompt, timeout=300, on_token=on_token)
+        raw = executor_registry.run(executor, prompt, timeout=300, on_token=on_token)
+        return MakeResult.from_subprocess(raw)
 
     # Default litellm path — but maker_model from settings may be an executor
     settings = _load_settings()
@@ -66,7 +108,8 @@ def make(spec: TaskSpec, *, on_token: Callable[[str], None] | None = None,
     if maker_model and executor_registry.get(maker_model):
         prompt = _build_prompt(spec, maker_model)
         _record_maker_event(request_id, session_id, maker_model, spec.why[:200])
-        return executor_registry.run(maker_model, prompt, timeout=300, on_token=on_token)
+        raw = executor_registry.run(maker_model, prompt, timeout=300, on_token=on_token)
+        return MakeResult.from_subprocess(raw)
 
     _record_maker_event(request_id, session_id, "litellm", spec.why[:200])
     return _call_litellm(spec, settings=settings, on_token=on_token, request_id=request_id, session_id=session_id)
@@ -88,8 +131,12 @@ def _call_litellm(spec: TaskSpec, *,
                   settings: dict | None = None,
                   on_token: Callable[[str], None] | None = None,
                   request_id: str | None = None,
-                  session_id: str | None = None) -> str:
-    """Call litellm with routing, skill injection, and streaming support."""
+                  session_id: str | None = None) -> MakeResult:
+    """Call litellm with routing, skill injection, and streaming support.
+
+    Returns MakeResult with real token usage from litellm response.
+    Both streaming and non-streaming paths capture usage.
+    """
     settings = settings if settings is not None else _load_settings()
     maker_model_alias = settings.get("maker_model", "")
 
@@ -114,23 +161,43 @@ def _call_litellm(spec: TaskSpec, *,
         params["temperature"] = temperature
 
     if on_token:
+        # 串流路徑：收集 chunks；litellm stream_options 可帶回 usage（若模型支援）
         chunks: list[str] = []
+        prompt_tokens = 0
+        completion_tokens = 0
         try:
-            stream = litellm.completion(stream=True, messages=messages,
-                                        max_tokens=max_tokens, **params)
+            stream = litellm.completion(
+                stream=True,
+                stream_options={"include_usage": True},
+                messages=messages,
+                max_tokens=max_tokens,
+                **params,
+            )
             for chunk in stream:
-                delta = chunk.choices[0].delta.content or ""
+                delta = chunk.choices[0].delta.content or "" if chunk.choices else ""
                 if delta:
                     chunks.append(delta)
                     on_token(delta)
-            return "".join(chunks)
+                # litellm 串流的最後一個 chunk 帶 usage（若模型支援）
+                if hasattr(chunk, "usage") and chunk.usage:
+                    prompt_tokens = getattr(chunk.usage, "prompt_tokens", 0) or 0
+                    completion_tokens = getattr(chunk.usage, "completion_tokens", 0) or 0
+            output = "".join(chunks)
+            # 若串流未帶回 usage，以 0 填充（cost_known 仍為 True，讓 runner 知道是 litellm 路徑）
+            return MakeResult.from_usage(output, prompt_tokens, completion_tokens)
         except Exception:
             if chunks:
-                return "".join(chunks)
+                output = "".join(chunks)
+                return MakeResult.from_usage(output, prompt_tokens, completion_tokens)
             raise
 
+    # 非串流路徑：直接從 response.usage 取 token 數
     response = litellm.completion(messages=messages, max_tokens=max_tokens, **params)
-    return response.choices[0].message.content or ""
+    output = response.choices[0].message.content or ""
+    usage = getattr(response, "usage", None)
+    prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0 if usage else 0
+    completion_tokens = getattr(usage, "completion_tokens", 0) or 0 if usage else 0
+    return MakeResult.from_usage(output, prompt_tokens, completion_tokens)
 
 
 def _record_maker_event(request_id: str | None, session_id: str | None,

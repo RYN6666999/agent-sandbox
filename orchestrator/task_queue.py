@@ -351,3 +351,49 @@ def ledger_update_task_cost(task_id: str, total_cost_usd: float) -> None:
                 "UPDATE task_queue SET cost_usd=?, updated_at=? WHERE task_id=?",
                 (total_cost_usd, now, task_id),
             )
+
+
+def find_active_by_fingerprint(fingerprint: str) -> "dict[str, Any] | None":
+    """查佇列裡是否已有相同 fingerprint 且「尚未 passed / dead」的任務。
+
+    去重範圍：pending / running / escalated。
+    - passed：已修好，允許下次重新產（若又紅代表新的回歸）。
+    - dead：環境錯，環境修好後允許重新產（不能讓一次偶發抖動永久封殺此 fingerprint）。
+    - escalated：程式碼問題交人，由人手動重試，機器不自動重試（審計可追溯）。
+
+    回傳第一個符合的任務 dict，沒有則回 None。
+    SQLite json_extract 查 notes_json 欄位，不另開資料表。
+    """
+    ensure_schema()
+    with _DB_LOCK:
+        with _connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM task_queue
+                WHERE json_extract(notes_json, '$.fingerprint') = ?
+                  AND status IN ('pending', 'running', 'escalated')
+                LIMIT 1
+                """,
+                (fingerprint,),
+            ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def count_by_status() -> dict[str, int]:
+    """回傳各狀態的任務數量。
+
+    保證五個合法狀態 key 永遠都在（無資料補 0），不因佇列空或某狀態無任務而漏 key。
+    """
+    ensure_schema()
+    # 初始化五個狀態全部為 0，確保 key 不漏
+    counts: dict[str, int] = {s: 0 for s in VALID_STATUSES}
+    with _DB_LOCK:
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) FROM task_queue GROUP BY status"
+            ).fetchall()
+    for row in rows:
+        status, n = row[0], row[1]
+        if status in counts:
+            counts[status] = n
+    return counts

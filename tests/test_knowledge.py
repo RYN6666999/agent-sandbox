@@ -164,6 +164,17 @@ def test_search_no_match(temp_knowledge_db):
     assert results == []
 
 
+def test_search_finds_cjk_content(temp_knowledge_db):
+    # Regression: FTS5 unicode61 doesn't segment CJK, so MATCH on a Chinese
+    # sub-term misses. search_knowledge must fall back to LIKE for these.
+    # This brain stores 繁中 genes/notes, so Chinese search is core, not edge.
+    knowledge.write_knowledge("gene/zh", "任務通過驗收 (score 10.0, via pytest): 整數相加")
+    assert len(knowledge.search_knowledge("驗收")) >= 1
+    assert len(knowledge.search_knowledge("整數")) >= 1
+    # ASCII embedded in CJK content still findable (FTS fast path)
+    assert len(knowledge.search_knowledge("pytest")) >= 1
+
+
 def test_search_respects_limit(temp_knowledge_db):
     for i in range(5):
         knowledge.write_knowledge("test/search", f"searchable content {i}")

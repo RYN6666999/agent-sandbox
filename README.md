@@ -116,7 +116,7 @@ python -m orchestrator.heartbeat --once           # 只跑一拍（除錯）
 
 ```bash
 pytest tests/
-# 347 passed（21 個測試檔）
+# 348 passed（21 個測試檔）
 ```
 
 ---
@@ -160,7 +160,7 @@ super-engine/
   ask.ts                    # One-shot CLI 模式（備用）
 data/
   settings.json             # 執行期設定（模型、executor、GBrain 等）
-tests/                      # 347 tests，涵蓋所有模組
+tests/                      # 348 tests，涵蓋所有模組
 ```
 
 ---
@@ -245,6 +245,6 @@ Bug 修復記錄 → [BUGFIX.md](BUGFIX.md)
 
 ## 狀態
 
-**v3 架構完整實作，347 tests 通過。**
+**v3 架構完整實作，348 tests 通過。**
 Scream 主導計劃與執行、Claude CLI 專責驗收、AgentOS 純 Action 回圈層已上線。
 Scheduler（自修復迴圈）已閉環：心跳 daemon 定期喚醒巡檢器 + runner，系統會自己跑。

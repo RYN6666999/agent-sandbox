@@ -26,7 +26,7 @@
 - [x] **Skill Bridge** — 自動掛載 Claude CLI 17 個 executable skill → 33 個 executor，9 項測試 ✅
 - [x] **Session C Scheduler（自修復迴圈閉環）** — task_queue + runner（三停六分支）+ A 巡檢器 + B 佇列 API（`/queue/*`）+ Trigger 心跳 daemon（`heartbeat.py`）。系統會自己跑了。
 - [x] **Session D Auto-Consolidate（自我成長）** — `orchestrator/auto_consolidate.py`：`/task/verify` 通過/撞線後自動萃取 gene 存 brain（pass→pattern / escalate→bug-fix，skip retry），best-effort 不破壞 verify，`settings.auto_consolidate` 可關。
-- [x] **全測試通過** — 347 passed（21 個測試檔）
+- [x] **全測試通過** — 348 passed（21 個測試檔）
 
 ---
 

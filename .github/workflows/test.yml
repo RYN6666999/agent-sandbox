@@ -1,0 +1,29 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: uv sync --extra dev
+
+      # Hermetic guard: Pydantic contracts + full pytest suite.
+      # No DB, no API keys (unit tests mock LLM calls).
+      # tsc/smoke from guard_all.py stay local (need node + a live server).
+      - name: guard:contracts
+        run: uv run python scripts/guard_contracts.py
+
+      - name: pytest
+        run: uv run pytest tests/ -q

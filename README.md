@@ -81,12 +81,17 @@ pip install fastapi litellm pydantic python-dotenv requests uvicorn websocket-cl
 uvicorn api.main:app --reload --port 8000
 ```
 
-### Gemini keep-warm daemon（選用，加速至 2.3s）
+### super-engine — Gemini/GenSpark 瀏覽器自動化（dormant，預設不啟用）
+
+> **預設路徑是 litellm（API key）。** super-engine 只是一條「用瀏覽器白嫖 GenSpark(Opus) /
+> Gemini 免費版」的省錢選項，**核心自修復迴圈不依賴它**（`maker.make()` 預設走 litellm，
+> `inspector → runner → checker → heartbeat` 完全不碰）。它也是全 repo 唯一脆的東西
+> （網頁改版/封鎖即斷，headless 已被擋）。確定走付費 API 可整段移除。要啟用才跑：
 
 ```bash
 cd super-engine
 npm install
-npx ts-node ask-daemon.ts   # 監聽 port 3456
+npx ts-node ask-daemon.ts   # keep-warm daemon，監聽 port 3456，Gemini ~2.3s
 ```
 
 ### Shell client

@@ -1,6 +1,0 @@
-{
-  "round": 1,
-  "score": 0.0,
-  "passed": false,
-  "feedback": "The output failed to address the user's prompt '測試' directly and instead provided an irrelevant error message regarding missing context."
-}

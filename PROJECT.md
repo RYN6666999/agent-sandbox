@@ -248,7 +248,12 @@ Plan 階段必須固定以下三種停損，不可事後才補：
       修復詳情見 [BUGFIX.md](BUGFIX.md)
 
 ### 下一棒
-- Session C: Scheduler（排程自動化）🔜
+- Session C: Scheduler（排程自動化）— **runner + queue 已完成，只差 Trigger(cron)**
+  - ✅ `orchestrator/task_queue.py` — SQLite 佇列 + 狀態機（pending→running→passed/escalated/dead）+ `cost_ledger` 持久化油表
+  - ✅ `orchestrator/runner.py` — 三停六分支（達標 ≥7.0 / 煞車 max_rounds+no_progress / 撞線 env_error+全局預算）；重啟後從 DB 重建油表
+  - ✅ `orchestrator/maker.py` — `make()` 改回傳 `MakeResult`，抓 V4 Flash usage（$0.09/$0.18 per M），subprocess 路徑標記 `cost_known=False`
+  - 🔜 **下一步（Session C 收尾）**：Trigger / cron 層 — 定時驅動 `run_loop()`，讓排程自動化真正閉環
+  - ❌ 尚未做：B-side 手動佇列 API（`/queue/push`、`/queue/status`）、巡檢器 A（自我巡檢自動產任務）
 - Session B: Model Router（成本控制）
 - Session D: Auto-Consolidate（自我成長）
 

@@ -510,15 +510,14 @@ async def _run_direct_and_push(session_id: str, spec: TaskSpec):
         asyncio.run_coroutine_threadsafe(push(session_id, "token", {"text": token}), loop)
 
     try:
-        output = await asyncio.to_thread(
+        result = await asyncio.to_thread(
             run_maker,
             spec,
-            "",
-            1,
-            on_token,
+            on_token=on_token,
             request_id=request_id,
             session_id=session_id,
         )
+        output = result.output
         sessions[session_id]["status"] = "done"
         sessions[session_id]["output"] = output
         decision_log.update_request_status(request_id, "done")
@@ -930,8 +929,8 @@ async def task_make(req: MakeRequest):
         spec = spec.model_copy(update={"executor": req.executor})
 
     try:
-        output = await asyncio.to_thread(run_maker, spec)
-        return MakeResponse(output=output)
+        result = await asyncio.to_thread(run_maker, spec)
+        return MakeResponse(output=result.output)
     except Exception as e:
         return MakeResponse(error=str(e))
 
@@ -987,11 +986,11 @@ async def task_run(req: TaskRunRequest):
         spec = spec.model_copy(update={"executor": "claude-code"})
 
     try:
-        output = await asyncio.wait_for(
+        result = await asyncio.wait_for(
             asyncio.to_thread(run_maker, spec),
             timeout=TASK_RUN_TIMEOUT,
         )
-        return TaskRunResponse(status="done", output=output)
+        return TaskRunResponse(status="done", output=result.output)
     except asyncio.TimeoutError:
         return TaskRunResponse(status="timeout", error=f"Task exceeded {TASK_RUN_TIMEOUT}s timeout")
     except Exception as e:

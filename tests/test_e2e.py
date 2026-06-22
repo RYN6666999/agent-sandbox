@@ -16,8 +16,9 @@ client = TestClient(app)
 
 def test_make_success():
     """POST /task/make → mock run_maker → output returned."""
+    from orchestrator.maker import MakeResult
     with patch("api.main.run_maker") as mock_maker:
-        mock_maker.return_value = "def hello(): pass"
+        mock_maker.return_value = MakeResult.from_subprocess("def hello(): pass")
         r = client.post("/task/make", json={"why": "write hello function"})
     assert r.status_code == 200
     body = r.json()
@@ -27,8 +28,9 @@ def test_make_success():
 
 def test_make_with_executor():
     """executor=web-llm-genspark passes executor to spec."""
+    from orchestrator.maker import MakeResult
     with patch("api.main.run_maker") as mock_maker:
-        mock_maker.return_value = "some output"
+        mock_maker.return_value = MakeResult.from_subprocess("some output")
         r = client.post("/task/make", json={
             "why": "explain recursion",
             "executor": "web-llm-genspark",

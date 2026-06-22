@@ -99,11 +99,19 @@ chmod +x scripts/agentos.sh
 ./scripts/agentos.sh protocol list
 ```
 
+### Scheduler 心跳 daemon（自修復迴圈）
+
+```bash
+# 定期喚醒 inspector + runner，系統自己跑
+python -m orchestrator.heartbeat --interval 300   # 每 5 分鐘一拍
+python -m orchestrator.heartbeat --once           # 只跑一拍（除錯）
+```
+
 ### 測試
 
 ```bash
 pytest tests/
-# 248 passed, 1 skipped（本機環境依賴）
+# 340 passed（20 個測試檔）
 ```
 
 ---
@@ -127,12 +135,16 @@ orchestrator/
   search.py                 # DuckDuckGo HTML 解析器（純 stdlib）
   agnes.py                  # Agnes 多模態 API 接入
   skill_bridge.py           # 自動掛載 .claude/skills/ 為 executor
+  task_queue.py             # SQLite 佇列 + 狀態機 + cost_ledger 持久化油表
+  runner.py                 # 三停六分支 run_loop（重啟後從 DB 重建油表）
+  inspector.py              # A 巡檢器：跑本地 pytest，失敗去重後產任務入佇列
+  heartbeat.py              # Trigger 心跳 daemon：定期喚醒 inspector + runner
 router/
   classifier.py             # routing_intent()：3 向分類（answer/code/unclear）
   mapping.py                # 模型技能映射
 contracts/
   task_spec.py              # TaskSpec Pydantic 定義
-protocols/                  # 12 份 agent 交互提示詞模板
+protocols/                  # 13 份 agent 交互提示詞模板
 scripts/
   agentos.sh                # Shell client（Scream → AgentOS）
   search-web.py             # web-search executor CLI wrapper
@@ -142,7 +154,7 @@ super-engine/
   ask.ts                    # One-shot CLI 模式（備用）
 data/
   settings.json             # 執行期設定（模型、executor、GBrain 等）
-tests/                      # 248+ tests，涵蓋所有模組
+tests/                      # 340 tests，涵蓋所有模組
 ```
 
 ---
@@ -163,7 +175,8 @@ tests/                      # 248+ tests，涵蓋所有模組
 - [x] **MCP 搜尋** — DuckDuckGo HTML 解析，純 stdlib
 - [x] **Agnes 多模態** — 看圖/產圖/產影片，4 API endpoints
 - [x] **Skill Bridge** — 自動掛載 .claude/skills/ 為 executor
-- [x] **協議模板庫** — 12 份 agent 交互模板（protocols/）
+- [x] **協議模板庫** — 13 份 agent 交互模板（protocols/）
+- [x] **Scheduler（自修復迴圈）** — Trigger 心跳 daemon + A 巡檢器 + task_queue + runner，系統會自己跑（Session C 完成）
 - [x] **端到端測試** — test_e2e.py 覆蓋完整流程
 
 ---
@@ -189,6 +202,12 @@ tests/                      # 248+ tests，涵蓋所有模組
 | POST | `/video/generate` | Agnes 產影片 |
 | GET | `/video/status/{task_id}` | 輪詢影片狀態 |
 | POST | `/skill-bridge/scan` | 掃描並注冊 Claude skills |
+| POST | `/queue/push` | 手動把任務放入佇列（source A/B） |
+| GET | `/queue/status` | 佇列五狀態計數 + 今日花費 |
+| GET | `/queue/list` | 列出任務（可按 status 過濾） |
+| GET | `/queue/task/{task_id}` | 單一任務詳情 |
+| GET | `/cost` | 累計 execution_route 次數（審計） |
+| GET | `/session/{session_id}` | 取得 session 狀態 |
 | GET | `/settings` | 取得設定 |
 | POST | `/settings` | 儲存設定 |
 | GET | `/models` | 列出可用模型（free/paid 分層） |
@@ -197,7 +216,7 @@ tests/                      # 248+ tests，涵蓋所有模組
 
 ## 下一棒（路線圖）
 
-- **Session C** — Scheduler（排程自動化：POST /schedule → cron → 自動執行 → 存 brain）
+- ~~**Session C** — Scheduler（排程自動化）~~ ✅ 已完成：Trigger 心跳 daemon + B 佇列 API + A 巡檢器
 - **Session B** — Model Router（成本控制：按任務類型 + 預算自動選模型）
 - **Session D** — Auto-Consolidate（每次 verify 後自動萃取 gene 存 brain）
 
@@ -219,5 +238,6 @@ Bug 修復記錄 → [BUGFIX.md](BUGFIX.md)
 
 ## 狀態
 
-**v3 架構完整實作，248 tests 通過。**
+**v3 架構完整實作，340 tests 通過。**
 Scream 主導計劃與執行、Claude CLI 專責驗收、AgentOS 純 Action 回圈層已上線。
+Scheduler（自修復迴圈）已閉環：心跳 daemon 定期喚醒巡檢器 + runner，系統會自己跑。

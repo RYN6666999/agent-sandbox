@@ -157,9 +157,13 @@ Postgres、Redis、Docker、雲端服務（資料隱私 + 降複雜度）。
 - `orchestrator/executor_registry.py` — registry 核心（register/get/list/run，三種 type）
 - `orchestrator/blackboard.py` — .sdd/ 檔案系統黑板
 - `orchestrator/knowledge.py` — **腦庫 SQLite 儲存層**（write/read/search/get_knowledge，FTS5）
-- `protocols/` — **協議模板庫**（8 份 agent 交互提示詞模板：handoff-opus / delegate-claude-code / delegate-subagent / record-session / review-request / task-breakdown / progress-report / write-protocol）
+- `orchestrator/task_queue.py` — SQLite 佇列 + 狀態機（pending→running→passed/escalated/dead）+ `cost_ledger` 持久化油表
+- `orchestrator/runner.py` — `run_loop()` 三停六分支；重啟後從 DB 重建油表
+- `orchestrator/inspector.py` — A 巡檢器：跑本地 pytest，失敗去重後產任務入佇列（source="A"）
+- `orchestrator/heartbeat.py` — Trigger 心跳 daemon：`run_once()` / `run_forever()`，定期喚醒 inspector + runner
+- `protocols/` — **協議模板庫**（13 份 agent 交互提示詞模板：handoff-opus / delegate-claude-code / delegate-subagent / record-session / review-request / task-breakdown / progress-report / write-protocol / agnes-multimodal / consolidate-experience / military-grade-sdlc / search-web / skill-bridge）
 - `align/core.py` — align 階段產出可派工 task brief
-- `api/main.py` — /chat / /converse / /task/run / /blackboard / /executors / /knowledge 端點
+- `api/main.py` — /chat / /converse / /task/{make,verify,run} / /blackboard / /executors / /knowledge / /queue/{push,status,list,task} / /cost / /search / /vision / /image / /video / /skill-bridge 端點
 - `router/classifier.py` — routing_intent()：3向分類（answer/code/unclear）
 - `router/` — 模型/技能路由
 - `contracts/` — TaskSpec 規格定義（含 executor 欄位）
@@ -171,7 +175,7 @@ Postgres、Redis、Docker、雲端服務（資料隱私 + 降複雜度）。
 - `super-engine/brave-profile/` — 🔑 已登入的 Brave profile
 - `scripts/agentos.sh` — Scream → AgentOS shell client（含 knowledge + protocol 指令）
 - `scripts/login-genspark.sh` — GenSpark 登入 helper
-- `tests/test_knowledge.py` — 腦庫 19 項測試（CRUD + FTS + metadata round-trip + slashes-in-key）
+- `tests/test_knowledge.py` — 腦庫 22 項測試（CRUD + FTS + metadata round-trip + slashes-in-key）
 
 ---
 
@@ -215,11 +219,12 @@ Plan 階段必須固定以下三種停損，不可事後才補：
 - [x] **腦庫 SQLite 整合** — `orchestrator/knowledge.py`（write/read/search/get_knowledge），
       FTS5 全文搜尋，獨立 `data/knowledge.db`，HTTP 端點（POST/GET /knowledge），
       shell client 支援（knowledge-write / knowledge-read / knowledge-search），19 項測試全過
-- [x] **協議模板庫** — `protocols/` 目錄，8 份 agent 交互提示詞模板（handoff-opus /
+- [x] **協議模板庫** — `protocols/` 目錄，13 份 agent 交互提示詞模板（handoff-opus /
       delegate-claude-code / delegate-subagent / record-session / review-request /
-      task-breakdown / progress-report / write-protocol），
+      task-breakdown / progress-report / write-protocol / agnes-multimodal /
+      consolidate-experience / military-grade-sdlc / search-web / skill-bridge），
       shell client 支援（protocol list / show / push），可推送到腦庫
-- [x] **測試覆蓋**：188+ tests（pytest），涵蓋 API、registry、super-engine、safety、blackboard、knowledge
+- [x] **測試覆蓋**：340 tests（pytest，20 個測試檔），涵蓋 API、registry、super-engine、safety、blackboard、knowledge、queue、runner、inspector、heartbeat
 - [x] **Phase 5 實戰驗證** — `/task/make` + GenSpark 13.5s 正常回應 ✅、
       `/task/verify` + pytest pass (10.0) / fail (2.0 + feedback) ✅、
       maker.py executor routing 修正 ✅
@@ -247,13 +252,16 @@ Plan 階段必須固定以下三種停損，不可事後才補：
       **結果：248 passed, 1 skipped（環境依賴）, 0 failed** ✅
       修復詳情見 [BUGFIX.md](BUGFIX.md)
 
+### 已完成：Session C Scheduler（自修復迴圈閉環 ✅）
+- ✅ `orchestrator/task_queue.py` — SQLite 佇列 + 狀態機（pending→running→passed/escalated/dead）+ `cost_ledger` 持久化油表
+- ✅ `orchestrator/runner.py` — `run_loop()` 三停六分支（達標 ≥7.0 / 煞車 max_rounds+no_progress / 撞線 env_error+全局預算）；重啟後從 DB 重建油表
+- ✅ `orchestrator/maker.py` — `make()` 回傳 `MakeResult`，抓 V4 Flash usage（$0.09/$0.18 per M），subprocess 路徑標記 `cost_known=False`
+- ✅ `orchestrator/inspector.py` — A 巡檢器：跑本地 pytest，失敗去重（pending/running/escalated）後產任務入佇列（source="A"）
+- ✅ B-side 手動佇列 API — `POST /queue/push`、`GET /queue/status`、`GET /queue/list`、`GET /queue/task/{id}`
+- ✅ `orchestrator/heartbeat.py` — **Trigger 心跳 daemon（最後一棒）**：`run_forever()` 定期喚醒 inspector + runner，預檢油表跨日自動歸零。系統會自己跑了。
+  - 啟動：`python -m orchestrator.heartbeat --interval 300`（`--once` 除錯）
+
 ### 下一棒
-- Session C: Scheduler（排程自動化）— **runner + queue 已完成，只差 Trigger(cron)**
-  - ✅ `orchestrator/task_queue.py` — SQLite 佇列 + 狀態機（pending→running→passed/escalated/dead）+ `cost_ledger` 持久化油表
-  - ✅ `orchestrator/runner.py` — 三停六分支（達標 ≥7.0 / 煞車 max_rounds+no_progress / 撞線 env_error+全局預算）；重啟後從 DB 重建油表
-  - ✅ `orchestrator/maker.py` — `make()` 改回傳 `MakeResult`，抓 V4 Flash usage（$0.09/$0.18 per M），subprocess 路徑標記 `cost_known=False`
-  - 🔜 **下一步（Session C 收尾）**：Trigger / cron 層 — 定時驅動 `run_loop()`，讓排程自動化真正閉環
-  - ❌ 尚未做：B-side 手動佇列 API（`/queue/push`、`/queue/status`）、巡檢器 A（自我巡檢自動產任務）
 - Session B: Model Router（成本控制）
 - Session D: Auto-Consolidate（自我成長）
 

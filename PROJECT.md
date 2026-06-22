@@ -161,6 +161,7 @@ Postgres、Redis、Docker、雲端服務（資料隱私 + 降複雜度）。
 - `orchestrator/runner.py` — `run_loop()` 三停六分支；重啟後從 DB 重建油表
 - `orchestrator/inspector.py` — A 巡檢器：跑本地 pytest，失敗去重後產任務入佇列（source="A"）
 - `orchestrator/heartbeat.py` — Trigger 心跳 daemon：`run_once()` / `run_forever()`，定期喚醒 inspector + runner
+- `orchestrator/auto_consolidate.py` — Session D：verify verdict → 一條 gene/ experience，`/task/verify` 後 best-effort 寫 brain（pass→pattern / escalate→bug-fix，skip retry）
 - `protocols/` — **協議模板庫**（13 份 agent 交互提示詞模板：handoff-opus / delegate-claude-code / delegate-subagent / record-session / review-request / task-breakdown / progress-report / write-protocol / agnes-multimodal / consolidate-experience / military-grade-sdlc / search-web / skill-bridge）
 - `align/core.py` — align 階段產出可派工 task brief
 - `api/main.py` — /chat / /converse / /task/{make,verify,run} / /blackboard / /executors / /knowledge / /queue/{push,status,list,task} / /cost / /search / /vision / /image / /video / /skill-bridge 端點
@@ -224,7 +225,7 @@ Plan 階段必須固定以下三種停損，不可事後才補：
       task-breakdown / progress-report / write-protocol / agnes-multimodal /
       consolidate-experience / military-grade-sdlc / search-web / skill-bridge），
       shell client 支援（protocol list / show / push），可推送到腦庫
-- [x] **測試覆蓋**：340 tests（pytest，20 個測試檔），涵蓋 API、registry、super-engine、safety、blackboard、knowledge、queue、runner、inspector、heartbeat
+- [x] **測試覆蓋**：347 tests（pytest，21 個測試檔），涵蓋 API、registry、super-engine、safety、blackboard、knowledge、queue、runner、inspector、heartbeat、auto-consolidate
 - [x] **Phase 5 實戰驗證** — `/task/make` + GenSpark 13.5s 正常回應 ✅、
       `/task/verify` + pytest pass (10.0) / fail (2.0 + feedback) ✅、
       maker.py executor routing 修正 ✅
@@ -261,9 +262,13 @@ Plan 階段必須固定以下三種停損，不可事後才補：
 - ✅ `orchestrator/heartbeat.py` — **Trigger 心跳 daemon（最後一棒）**：`run_forever()` 定期喚醒 inspector + runner，預檢油表跨日自動歸零。系統會自己跑了。
   - 啟動：`python -m orchestrator.heartbeat --interval 300`（`--once` 除錯）
 
+### 已完成：Session D Auto-Consolidate（自我成長 ✅）
+- ✅ `orchestrator/auto_consolidate.py` — `verdict_to_experience()`（純）+ `auto_consolidate()`（best-effort，never raises）
+- ✅ `/task/verify` 通過/撞線後自動萃取 gene 存 brain，response 帶 `consolidated` keys；`settings.auto_consolidate` 預設 on，可關
+- ✅ 只在 pass/escalate 觸發，skip retry（避免 brain 被中途態噪音污染）
+
 ### 下一棒
-- Session B: Model Router（成本控制）
-- Session D: Auto-Consolidate（自我成長）
+- Session B: Model Router（成本控制）— **評估後判定多半已落地**（`router/mapping.py` 按任務類型選模型 + `runner` 的 `cost_ledger`/撞線停）。剩「預算低時降級」一小片，且會傷 architecture 品質。擱置，真量到成本痛再補 ~20 行。詳見 `.scream-code/optimization-report-2026-06-22.md`。
 
 ### 擱置 Backlog
 - frontend clarify_routing UI（React desktop 已廢棄，TUI 也不做）

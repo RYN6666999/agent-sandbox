@@ -1061,6 +1061,13 @@ async def task_verify(req: VerifyRequest):
             run_verification, spec, req.output,
             prev_score=req.prev_score, max_rounds=req.max_rounds,
         )
+        # Session D: auto-consolidate terminal outcomes into the brain.
+        # Best-effort (never raises); gated by settings.auto_consolidate (default on).
+        if _load_settings().get("auto_consolidate", True):
+            from orchestrator.auto_consolidate import auto_consolidate
+            genes = await asyncio.to_thread(auto_consolidate, spec, result)
+            if genes:
+                result["consolidated"] = [g["key"] for g in genes]
         return result
     except Exception as e:
         return {"status": "escalate", "score": 0.0, "feedback": str(e),

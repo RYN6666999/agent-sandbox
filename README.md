@@ -198,10 +198,14 @@ tests/                      # 348 tests，涵蓋所有模組
 | POST | `/task/make` | 一次性 maker call（Scream 用） |
 | POST | `/task/verify` | 單次驗收（check → pass/retry/escalate） |
 | POST | `/task/run` | 同步執行（legacy，保持相容） |
+| POST | `/task/submit` | align gate step 1（legacy，新呼叫用 `/chat`） |
+| POST | `/task/approve` | align gate approve（legacy） |
+| POST | `/task/deliver` | A gate：使用者收/退最終產出（legacy） |
 | GET/POST | `/blackboard/{key}` | 黑板讀寫 |
 | GET | `/executors` | 列出所有已注冊 executor |
 | GET/POST | `/knowledge/{key}` | 腦庫讀寫 |
-| GET | `/knowledge/search?q=` | FTS5 全文搜尋 |
+| GET | `/knowledge/id/{entry_id}` | 用 entry_id 取單筆 |
+| GET | `/knowledge/search?q=` | 全文搜尋（FTS5，中文走 LIKE fallback） |
 | POST | `/brain/consolidate` | 記憶固化（experiences → gene/） |
 | GET/POST | `/search` | DuckDuckGo 網頁搜尋 |
 | POST | `/vision/analyze` | Agnes 看圖 |
@@ -218,6 +222,7 @@ tests/                      # 348 tests，涵蓋所有模組
 | GET | `/settings` | 取得設定 |
 | POST | `/settings` | 儲存設定 |
 | GET | `/models` | 列出可用模型（free/paid 分層） |
+| WS | `/ws/{session_id}` | WebSocket（串流任務進度） |
 
 ---
 

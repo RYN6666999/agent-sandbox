@@ -336,7 +336,8 @@ def search_knowledge(query: str, limit: int = 10) -> list[dict[str, Any]]:
     try:
         with _DB_LOCK:
             with _connect() as conn:
-                # Try FTS5 search first
+                # FTS5 fast path — great for ASCII / space-delimited terms.
+                rows: list = []
                 try:
                     rows = conn.execute(
                         """
@@ -351,7 +352,13 @@ def search_knowledge(query: str, limit: int = 10) -> list[dict[str, Any]]:
                         (query, limit),
                     ).fetchall()
                 except (sqlite3.OperationalError, sqlite3.DatabaseError):
-                    # FTS5 not available or not built — fallback to LIKE
+                    rows = []
+                # ponytail: FTS5 unicode61 doesn't segment CJK — Chinese text
+                # tokenizes to one big token, so MATCH on a sub-term misses.
+                # Fall back to a LIKE substring scan (correct for any language,
+                # also covers FTS-unavailable). O(n) but fine at personal-brain
+                # scale — swap to a CJK-aware tokenizer if entries grow large.
+                if not rows:
                     rows = conn.execute(
                         """
                         SELECT id, key, content, metadata, created_at, updated_at,

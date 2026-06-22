@@ -225,7 +225,7 @@ Plan 階段必須固定以下三種停損，不可事後才補：
       task-breakdown / progress-report / write-protocol / agnes-multimodal /
       consolidate-experience / military-grade-sdlc / search-web / skill-bridge），
       shell client 支援（protocol list / show / push），可推送到腦庫
-- [x] **測試覆蓋**：347 tests（pytest，21 個測試檔），涵蓋 API、registry、super-engine、safety、blackboard、knowledge、queue、runner、inspector、heartbeat、auto-consolidate
+- [x] **測試覆蓋**：348 tests（pytest，21 個測試檔），涵蓋 API、registry、super-engine、safety、blackboard、knowledge、queue、runner、inspector、heartbeat、auto-consolidate
 - [x] **Phase 5 實戰驗證** — `/task/make` + GenSpark 13.5s 正常回應 ✅、
       `/task/verify` + pytest pass (10.0) / fail (2.0 + feedback) ✅、
       maker.py executor routing 修正 ✅

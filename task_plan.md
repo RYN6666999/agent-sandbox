@@ -25,19 +25,16 @@
 - [x] **Agnes 多模態 MCP** — 看圖/產圖/產影片，4 API endpoints，20 項測試 ✅
 - [x] **Skill Bridge** — 自動掛載 Claude CLI 17 個 executable skill → 33 個 executor，9 項測試 ✅
 - [x] **Session C Scheduler（自修復迴圈閉環）** — task_queue + runner（三停六分支）+ A 巡檢器 + B 佇列 API（`/queue/*`）+ Trigger 心跳 daemon（`heartbeat.py`）。系統會自己跑了。
-- [x] **全測試通過** — 340 passed（20 個測試檔）
+- [x] **Session D Auto-Consolidate（自我成長）** — `orchestrator/auto_consolidate.py`：`/task/verify` 通過/撞線後自動萃取 gene 存 brain（pass→pattern / escalate→bug-fix，skip retry），best-effort 不破壞 verify，`settings.auto_consolidate` 可關。
+- [x] **全測試通過** — 347 passed（21 個測試檔）
 
 ---
 
 ## 下一棒（依優先序）
 
-### Session B: Model Router（成本控制）🔜
+### Session B: Model Router（成本控制）— 擱置
 
-根據任務類型 + 預算上限自動選模型。settings.json 可設 `max_budget_per_session: 0.50`。
-
-### Session D: Auto-Consolidate（自我成長）
-
-每次 `POST /task/verify` 完成後自動 call consolidate，從任務萃取 gene 存 brain。
+評估後判定多半已落地：`router/mapping.py` 按任務類型選模型 + `runner` 的 `cost_ledger`/撞線停。剩「預算低時降級」一小片，且會傷 architecture 品質。真量到成本痛再補 ~20 行，不當 Session 做。詳見 `.scream-code/optimization-report-2026-06-22.md`。
 
 ---
 
@@ -63,8 +60,11 @@
 ## 優先序一覽
 
 ```
-階段二完成 🎉  Session C Scheduler 完成 🎉（自修復迴圈閉環）
-下一棒: Model Router（成本控制）
-再下一棒: Auto-Consolidate（自我成長）
-Backlog: clarify_routing UI / headless / 沙箱
+階段二完成 🎉  Session C Scheduler 完成 🎉  Session D Auto-Consolidate 完成 🎉
+下一棒: 無硬性 — 跑起來看真實使用再定（Model Router 擱置）
+Backlog: clarify_routing UI / headless / 沙箱 / Model Router
 ```
+
+說明：核心四循環（safety/clarify/route/verify）+ 自修復迴圈（Scheduler）+ 自我成長
+（Auto-Consolidate）皆已閉環。系統可自跑、自修、自記。下一步建議：讓 heartbeat 實跑一段，
+用真實 trace 餵 OPTIMIZATION.md 的評測集，量出下一個值得投資的點。

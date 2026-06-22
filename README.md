@@ -116,7 +116,7 @@ python -m orchestrator.heartbeat --once           # 只跑一拍（除錯）
 
 ```bash
 pytest tests/
-# 340 passed（20 個測試檔）
+# 347 passed（21 個測試檔）
 ```
 
 ---
@@ -144,6 +144,7 @@ orchestrator/
   runner.py                 # 三停六分支 run_loop（重啟後從 DB 重建油表）
   inspector.py              # A 巡檢器：跑本地 pytest，失敗去重後產任務入佇列
   heartbeat.py              # Trigger 心跳 daemon：定期喚醒 inspector + runner
+  auto_consolidate.py       # Session D：verify verdict → gene/，verify 後自動寫 brain
 router/
   classifier.py             # routing_intent()：3 向分類（answer/code/unclear）
   mapping.py                # 模型技能映射
@@ -159,7 +160,7 @@ super-engine/
   ask.ts                    # One-shot CLI 模式（備用）
 data/
   settings.json             # 執行期設定（模型、executor、GBrain 等）
-tests/                      # 340 tests，涵蓋所有模組
+tests/                      # 347 tests，涵蓋所有模組
 ```
 
 ---
@@ -182,6 +183,7 @@ tests/                      # 340 tests，涵蓋所有模組
 - [x] **Skill Bridge** — 自動掛載 .claude/skills/ 為 executor
 - [x] **協議模板庫** — 13 份 agent 交互模板（protocols/）
 - [x] **Scheduler（自修復迴圈）** — Trigger 心跳 daemon + A 巡檢器 + task_queue + runner，系統會自己跑（Session C 完成）
+- [x] **Auto-Consolidate（自我成長）** — `/task/verify` 通過/撞線後自動萃取 gene 存 brain（Session D 完成）
 - [x] **端到端測試** — test_e2e.py 覆蓋完整流程
 
 ---
@@ -222,8 +224,8 @@ tests/                      # 340 tests，涵蓋所有模組
 ## 下一棒（路線圖）
 
 - ~~**Session C** — Scheduler（排程自動化）~~ ✅ 已完成：Trigger 心跳 daemon + B 佇列 API + A 巡檢器
-- **Session B** — Model Router（成本控制：按任務類型 + 預算自動選模型）
-- **Session D** — Auto-Consolidate（每次 verify 後自動萃取 gene 存 brain）
+- ~~**Session D** — Auto-Consolidate（每次 verify 後自動萃取 gene 存 brain）~~ ✅ 已完成：`/task/verify` 通過/撞線後自動寫 gene/
+- **Session B** — Model Router（成本控制）：評估後判定多半已由 `router/mapping.py` + `cost_ledger` 覆蓋，擱置（見優化報告）
 
 ---
 
@@ -243,6 +245,6 @@ Bug 修復記錄 → [BUGFIX.md](BUGFIX.md)
 
 ## 狀態
 
-**v3 架構完整實作，340 tests 通過。**
+**v3 架構完整實作，347 tests 通過。**
 Scream 主導計劃與執行、Claude CLI 專責驗收、AgentOS 純 Action 回圈層已上線。
 Scheduler（自修復迴圈）已閉環：心跳 daemon 定期喚醒巡檢器 + runner，系統會自己跑。

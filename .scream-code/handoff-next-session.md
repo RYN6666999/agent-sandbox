@@ -83,7 +83,8 @@ b930d35 feat: Skill Bridge — 自動掛載 Claude CLI 17 個 executable skill
 - Agnes 多模態 MCP（agnes-analyze / agnes-image / agnes-video executors + 4 API endpoints + 20 項測試）
 - Skill Bridge（自動掛載 Claude CLI 17 個 executable skill → 33 個 executor + 掃描 API + 9 項測試）
 - **Session C Scheduler（自修復迴圈閉環）** — task_queue + runner（三停六分支）+ inspector（A 巡檢器）+ B 佇列 API（/queue/*）+ Trigger 心跳 daemon（heartbeat.py）。系統會自己跑了。
-- **全測試通過：340 passed（20 個測試檔）**
+- **Session D Auto-Consolidate（自我成長）** — auto_consolidate.py：/task/verify 通過/撞線後自動萃取 gene 存 brain。系統會自己記了。
+- **全測試通過：347 passed（21 個測試檔）**
 
 ### 待辦（依優先序）
 
@@ -96,13 +97,14 @@ b930d35 feat: Skill Bridge — 自動掛載 Claude CLI 17 個 executable skill
   Session A: Skill Bridge ✅
   ──────────── Roadmap 階段二完成 🎉
   Session C: Scheduler（排程自動化）✅ — 自修復迴圈閉環
-  ──────────── Session C 完成 🎉
+  Session D: Auto-Consolidate（自我成長）✅ — verify 後自動寫 gene
+  ──────────── Session C + D 完成 🎉
 
 下一個:
-  Session B: 成本 Model Router 🔜
-  Session D: 自動學習
+  無硬性 — 跑起來看真實使用再定
+  Session B（Model Router）擱置：多半已由 mapping.py + cost_ledger 覆蓋
 
-Backlog: clarify_routing UI / headless / 沙箱
+Backlog: clarify_routing UI / headless / 沙箱 / Model Router
 ```
 
 ### 已決定不做
@@ -123,13 +125,20 @@ Backlog: clarify_routing UI / headless / 沙箱
 - `orchestrator/heartbeat.py` — Trigger 心跳 daemon（`python -m orchestrator.heartbeat`）
 - B 佇列 API：`/queue/push`、`/queue/status`、`/queue/list`、`/queue/task/{id}`
 
-### 下一個任務：Session B — Model Router（成本控制）🔜
+### 已完成：Session D — Auto-Consolidate（自我成長）✅
 
-**目標**：根據任務類型 + 預算上限自動選模型。settings.json 可設 `max_budget_per_session: 0.50`。
+系統會自己記了：
+- `orchestrator/auto_consolidate.py` — `verdict_to_experience()`（純）+ `auto_consolidate()`（best-effort）
+- `/task/verify` 通過/撞線後自動萃取 gene 存 brain，response 帶 `consolidated` keys
+- 只在 pass/escalate 觸發（skip retry），`settings.auto_consolidate` 預設 on 可關
 
-### 再下一棒：Session D — Auto-Consolidate（自我成長）
+### 下一個任務：無硬性指定
 
-**目標**：每次 `POST /task/verify` 完成後自動 call consolidate，從任務萃取 gene 存 brain。
+核心循環 + 自修復 + 自我成長皆已閉環。建議讓 `heartbeat` 實跑一段，用真實 trace 餵
+`OPTIMIZATION.md` 評測集，量出下一個值得投資的點，而非預先蓋 Session B。
+
+**Session B（Model Router）擱置**：評估後多半已由 `router/mapping.py`（按任務類型選模型）
++ `runner` 的 `cost_ledger`/撞線停覆蓋。詳見 `.scream-code/optimization-report-2026-06-22.md`。
 
 ### 紅線提醒
 

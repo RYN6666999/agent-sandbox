@@ -270,7 +270,7 @@ def write_knowledge(
     """
     entry_id = uuid.uuid4().hex[:16]
     meta_json = json.dumps(metadata or {}, ensure_ascii=False)
-    now = __import__('datetime').datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
+    now = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
 
     try:
         with _DB_LOCK:
@@ -451,7 +451,7 @@ def consolidate_experiences(
         metadata = {
             "domain": domain,
             "type": exp_type,
-            "date": __import__('datetime').datetime.utcnow().strftime('%Y-%m-%d'),
+            "date": __import__('datetime').datetime.now(__import__('datetime').timezone.utc).strftime('%Y-%m-%d'),
             "tags": exp.get("tags", []),
         }
 

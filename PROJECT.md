@@ -240,6 +240,12 @@ Plan 階段必須固定以下三種停損，不可事後才補：
 - [x] 端到端整合測試（test_e2e.py 14 項全過）
 - [x] MCP 搜尋工具接入（階段二）
 - [x] Agnes 多模態 MCP 接入（階段二）
+- [x] **全面 Debug 與測試債清理（2026-06-21）** — 共修復 16 個失敗測試（5 類問題）：
+      executor registry 缺失自動注冊（D24）、測試 patch 已刪除的 `_llm_score`（D25）、
+      `run_loop` → `run_verification` 改名未同步、`/models` 格式不一致、
+      環境依賴測試加 `pytest.skip`。
+      **結果：248 passed, 1 skipped（環境依賴）, 0 failed** ✅
+      修復詳情見 [BUGFIX.md](BUGFIX.md)
 
 ### 下一棒
 - Session C: Scheduler（排程自動化）🔜

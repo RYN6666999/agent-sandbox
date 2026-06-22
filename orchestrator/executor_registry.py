@@ -2,17 +2,20 @@
 import json
 import shutil
 import subprocess
+import sys
 import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Any, Callable
 
 SETTINGS_PATH = Path(__file__).parent.parent / "data" / "settings.json"
+_SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 
 # In-memory registry
 _registry: dict[str, dict[str, Any]] = {}
 
 # Built-in executors (merged with settings.json overrides on module load)
+# web-search / agnes-* 使用 sys.executable 確保在任何虛擬環境下都能找到正確的 python
 _BUILTIN_EXECUTORS: dict[str, dict[str, Any]] = {
     "claude-code": {
         "name": "claude-code",
@@ -21,6 +24,34 @@ _BUILTIN_EXECUTORS: dict[str, dict[str, Any]] = {
         "prompt_flag": "-p",
         "model_flag": "--model",
         "default_model": "claude-sonnet-4-6",
+        "timeout": 300,
+        "type": "subprocess",
+    },
+    "web-search": {
+        "name": "web-search",
+        "binary": sys.executable,
+        "flags": [str(_SCRIPTS_DIR / "search-web.py")],
+        "timeout": 30,
+        "type": "subprocess",
+    },
+    "agnes-analyze": {
+        "name": "agnes-analyze",
+        "binary": sys.executable,
+        "flags": [str(_SCRIPTS_DIR / "agnes-analyze.py"), "--image-url"],
+        "timeout": 60,
+        "type": "subprocess",
+    },
+    "agnes-image": {
+        "name": "agnes-image",
+        "binary": sys.executable,
+        "flags": [str(_SCRIPTS_DIR / "agnes-image.py"), "--prompt"],
+        "timeout": 120,
+        "type": "subprocess",
+    },
+    "agnes-video": {
+        "name": "agnes-video",
+        "binary": sys.executable,
+        "flags": [str(_SCRIPTS_DIR / "agnes-video.py"), "--prompt"],
         "timeout": 300,
         "type": "subprocess",
     },

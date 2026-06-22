@@ -171,30 +171,35 @@ class TestCheckerCaseC:
         assert "[PYTEST]" in result.feedback
 
 
-# ── LLM fallback path is marked ──────────────────────────────────────────────
+# ── Claude CLI fallback path (v3: 取代 _llm_score) ───────────────────────────
+# v3 重構後 _llm_score 已刪除，文字/無測試程式碼 → _claude_cli_check
+# 測試 mock _claude_cli_check 以避免實際呼叫 claude CLI
 
 class TestLlmFallbackMarker:
-    def test_text_output_marked_llm_scored(self):
-        """Pure text output should fall back to LLM path with marker."""
+    def test_text_output_delegates_to_claude_cli(self):
+        """Pure text output → falls back to _claude_cli_check (claude-cli source)."""
+        from orchestrator.checker import CheckResult as CR
         spec = make_spec(why="Summarize the history of Rome")
         text_output = (
             "Rome was founded in 753 BC. It became a republic and then an empire. "
             "It fell in 476 AD."
         )
-        # We don't want to hit a real LLM in unit tests, so mock _llm_score
-        with patch("orchestrator.checker._llm_score", return_value=(8.0, "good summary")):
+        fake = CR(passed=True, score=8.0, feedback="[CLAUDE-CLI] good summary", source="claude-cli")
+        with patch("orchestrator.checker._claude_cli_check", return_value=fake):
             result = check(spec, text_output)
 
-        assert "LLM_SCORED" in result.feedback
+        assert result.source == "claude-cli"
         assert result.pytest_result is None
 
-    def test_code_without_tests_marked_llm_scored(self):
-        """Code that has no def test_* → LLM fallback, clearly marked."""
+    def test_code_without_tests_delegates_to_claude_cli(self):
+        """Code with no def test_* → _claude_cli_check, not pytest."""
+        from orchestrator.checker import CheckResult as CR
         spec = make_spec()
         impl_only = "def add(a, b):\n    return a + b\n"
 
-        with patch("orchestrator.checker._llm_score", return_value=(7.5, "looks good")):
+        fake = CR(passed=True, score=7.5, feedback="[CLAUDE-CLI] looks good", source="claude-cli")
+        with patch("orchestrator.checker._claude_cli_check", return_value=fake):
             result = check(spec, impl_only)
 
-        assert "LLM_SCORED" in result.feedback
+        assert result.source == "claude-cli"
         assert result.pytest_result is None

@@ -804,6 +804,109 @@ def skill_bridge_scan():
     return scan(force=True)
 
 
+# ── B 端點：手動佇列 API ──────────────────────────────────────────────────
+# 設計原則：端點只做「收參數 → 呼叫 task_queue → 回傳結果」，不含任何業務邏輯。
+# 安全檢查（safety gate）在 runner 執行任務時進行，不在入隊時擋。
+# source 欄位存入 notes，不改 task_queue schema。
+
+
+_VALID_SOURCES = frozenset({"A", "B"})
+
+
+class QueuePushRequest(BaseModel):
+    source: str = "B"
+    spec: dict
+
+
+class QueueTaskSummary(BaseModel):
+    task_id: str
+    source: str
+    status: str
+    attempt_count: int
+    last_score: float | None
+    cost_usd: float
+    created_at: str
+
+
+@app.post("/queue/push")
+def queue_push(req: QueuePushRequest):
+    """手動把任務放入佇列。source 只接受 'A' 或 'B'，未傳預設 'B'。"""
+    from orchestrator import task_queue
+    from pydantic import ValidationError
+
+    # source 合法性檢查：只接受 A/B，非法值回 422（審計欄位不能靜默竄改）
+    if req.source not in _VALID_SOURCES:
+        raise HTTPException(422, f"source must be 'A' or 'B', got {req.source!r}")
+
+    # 用 TaskSpec 驗證 spec；端點內部手動建構不會觸發 FastAPI 的 422 handler，
+    # 需自行 catch ValidationError 並轉成 HTTPException(422)
+    try:
+        spec = TaskSpec(**req.spec)
+    except ValidationError as exc:
+        # exc.errors() 含不可 JSON 序列化的 ValueError 物件（Pydantic v2 ctx.error），
+        # 改用 str(exc) 確保 HTTPException detail 可正確序列化
+        raise HTTPException(422, detail=str(exc))
+
+    task_id = task_queue.push(spec, notes={"source": req.source})
+    return {"task_id": task_id}
+
+
+@app.get("/queue/status")
+def queue_status():
+    """回傳佇列各狀態計數 + 今日已花費（USD）。五個狀態 key 永遠都在。"""
+    from orchestrator import task_queue
+
+    counts = task_queue.count_by_status()
+    spent = task_queue.ledger_spent_today()
+    return {
+        "pending":   counts["pending"],
+        "running":   counts["running"],
+        "passed":    counts["passed"],
+        "escalated": counts["escalated"],
+        "dead":      counts["dead"],
+        "spent_today_usd": spent,
+    }
+
+
+@app.get("/queue/list")
+def queue_list(status: str | None = None, limit: int = 100):
+    """列出任務。status 可選；未傳列全部。回傳精簡欄位陣列。"""
+    from orchestrator import task_queue
+
+    if status is not None and status not in task_queue.VALID_STATUSES:
+        raise HTTPException(422, f"status must be one of {sorted(task_queue.VALID_STATUSES)}")
+
+    if status is None:
+        rows = task_queue.list_all(limit=limit)
+    else:
+        rows = task_queue.list_triage(status=status, limit=limit)
+
+    tasks = [
+        QueueTaskSummary(
+            task_id=r["task_id"],
+            source=r.get("notes", {}).get("source", "B"),
+            status=r["status"],
+            attempt_count=r["attempt_count"],
+            last_score=r.get("last_score"),
+            cost_usd=r.get("cost_usd", 0.0),
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
+    return {"tasks": [t.model_dump() for t in tasks], "count": len(tasks)}
+
+
+@app.get("/queue/task/{task_id}")
+def queue_get_task(task_id: str):
+    """取得單一任務詳情。找不到回 404。"""
+    from orchestrator import task_queue
+
+    task = task_queue.get_task(task_id)
+    if task is None:
+        raise HTTPException(404, f"task '{task_id}' not found")
+    return task
+
+
 # ── Agnes multimodal ──────────────────────────────────────────────────────
 
 

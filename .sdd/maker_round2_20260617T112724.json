@@ -1,4 +1,0 @@
-{
-  "output": "Connection test failed. The target LLM API (Gemini) returned a `429 Rate Limit` error, indicating that the free tier quota for input tokens and requests has been exhausted.\n\n**Skipped/Notes:**\n1.  No code changes needed; this is an infrastructure/billing constraint, not a logic bug.\n2.  Retry after ~54 seconds or upgrade the API plan.\n3.  Verify API key validity and project billing status in Google Cloud Console.",
-  "round": 2
-}

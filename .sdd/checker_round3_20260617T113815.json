@@ -1,6 +1,0 @@
-{
-  "round": 3,
-  "score": 7.0,
-  "passed": true,
-  "feedback": "The code correctly implements the core logic but fails to address the explicit instruction to add an API key environment variable, leaving a hardcoded placeholder."
-}

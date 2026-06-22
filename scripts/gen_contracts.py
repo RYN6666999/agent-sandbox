@@ -1,12 +1,15 @@
 """
 Generates contracts/<action>.py from MODEL_BODIES defined in this file.
-openspec/specs/*.spec.md are the specification documents (input/success/error/examples).
-MODEL_BODIES is the actual source of truth for generated code.
+
+Single source of truth: MODEL_BODIES (this file). It is what gets generated.
+openspec/specs/*.spec.md are DESCRIPTIVE intent docs (human-readable
+input/success/error/examples), not the generator input. They describe why a
+contract looks the way it does; they do not drive code generation.
 
 To change a contract: edit MODEL_BODIES here, then re-run this script.
-To change the spec doc: edit the .spec.md file.
-Keep both in sync — spec describes intent, MODEL_BODIES implements it.
-Never hand-edit contracts/.
+Update the matching .spec.md when intent changes, so the prose stays honest.
+Never hand-edit contracts/ (regenerated) and never treat .spec.md as the
+generator's input (it isn't parsed).
 """
 import json
 import re

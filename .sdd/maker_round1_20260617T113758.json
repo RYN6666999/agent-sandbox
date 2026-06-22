@@ -1,4 +1,0 @@
-{
-  "output": "```python\nprint(\"Connection established.\")\n```\n\nSkipped: Complex agent logic, error handling, and network mocking. Add these if the connection fails or requires specific protocol validation.",
-  "round": 1
-}

@@ -84,7 +84,7 @@ b930d35 feat: Skill Bridge — 自動掛載 Claude CLI 17 個 executable skill
 - Skill Bridge（自動掛載 Claude CLI 17 個 executable skill → 33 個 executor + 掃描 API + 9 項測試）
 - **Session C Scheduler（自修復迴圈閉環）** — task_queue + runner（三停六分支）+ inspector（A 巡檢器）+ B 佇列 API（/queue/*）+ Trigger 心跳 daemon（heartbeat.py）。系統會自己跑了。
 - **Session D Auto-Consolidate（自我成長）** — auto_consolidate.py：/task/verify 通過/撞線後自動萃取 gene 存 brain。系統會自己記了。
-- **全測試通過：348 passed（21 個測試檔）**
+- **全測試通過：pytest 全綠（CI 自動守）**
 
 ### 待辦（依優先序）
 

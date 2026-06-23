@@ -41,10 +41,13 @@ STDOUT_MAX: int = 8000             # 保留的 pytest 輸出上限（字元）
 TESTS_DIR: str = "tests"           # 預設跑的目錄，可被 run_inspection 覆蓋
 TASK_MAX_ROUNDS: int = 3           # A 自動產任務的 max_rounds（修測試比生 code 容易）
 
-# 解析 pytest -v 輸出裡的失敗測試名
-# 格式：tests/test_foo.py::test_bar FAILED  或  tests/test_foo.py::Class::test_bar FAILED
+# 解析 pytest「short test summary info」裡的失敗測試名。
+# 格式：FAILED tests/test_foo.py::test_bar  （FAILED 在前，路徑在後）
+# 這行在 -q / normal / -v 各模式的 summary 區都會出現，不依賴 verbosity。
+# 舊版假設 "<path> FAILED"（-v 的 per-test 行），但命令的 -q 抵消了 -v，
+# 真實輸出根本沒有那種行 → regex 永遠不命中 → inspector 偵測形同 no-op。
 _FAILED_LINE_RE = re.compile(
-    r'^(tests/\S+\.py::\S+)\s+FAILED',
+    r'^FAILED\s+(\S+\.py::\S+)',
     re.MULTILINE,
 )
 
@@ -52,15 +55,19 @@ _FAILED_LINE_RE = re.compile(
 # ── pytest runner ─────────────────────────────────────────────────────────────
 
 def _run_pytest(tests_dir: str, timeout: int = PYTEST_TIMEOUT) -> dict[str, Any]:
-    """跑 pytest <tests_dir> -v，回傳 {stdout, exit_code, timed_out, error}。
+    """跑 pytest <tests_dir>，回傳 {stdout, exit_code, timed_out, error}。
 
     永不拋例外，所有錯誤都包進回傳 dict。
-    -v 是必要的：-q 輸出不含完整測試名，無法解析失敗的單個測試。
-    --tb=no：不要 traceback，減少輸出雜訊（失敗名解析不需要 traceback）。
+    解析靠「short test summary info」的 `FAILED <path>::<test>` 行：
+      -rf  ：強制輸出 failed 的 short summary（解析來源，不依賴 verbosity）。
+      --tb=no：不要 traceback，減少輸出雜訊（失敗名解析不需要 traceback）。
+      -q   ：壓掉 per-test 雜訊；summary 仍會印 FAILED 行。
+    （舊版用 `-v ... -q` 自相矛盾——-q 抵消 -v，輸出回 normal，
+      害得只配 -v 格式的 regex 永遠不命中。）
     """
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", tests_dir, "-v", "--tb=no", "-q"],
+            [sys.executable, "-m", "pytest", tests_dir, "--tb=no", "-q", "-rf"],
             capture_output=True,
             text=True,
             timeout=timeout,

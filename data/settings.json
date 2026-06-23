@@ -1,8 +1,8 @@
 {
   "plan_model": "openrouter-classifier",
-  "maker_model": "web-llm-genspark",
+  "maker_model": "openrouter/meta-llama/llama-3.1-8b-instruct",
   "converse_model": "agnes",
-  "checker_model": "openrouter/google/gemma-4-26b-a4b-it:free",
+  "checker_model": "openrouter/google/gemma-3-12b-it",
   "checker_fallbacks": [
     "agnes"
   ],

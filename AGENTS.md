@@ -24,6 +24,13 @@ cd ~/agent-sandbox
 就這樣。`up` 會啟動後端、等它活、印出「接上了」。要連前端 UI 才另跑 `./dev.sh`。
 （底層等同 `.venv/bin/uvicorn api.main:app --port 8000` + `curl localhost:8000/health`。）
 
+**連 `up` 都不想打？** 裝自動啟動，登入就常駐、崩了自動重啟，agent 直接用 :8000：
+
+```bash
+./scripts/install-autostart.sh             # 裝 + 載入（macOS LaunchAgent）
+./scripts/install-autostart.sh --uninstall # 移除
+```
+
 ## 怎麼呼叫（二選一，同一個後端）
 
 **Shell client**（`scripts/agentos.sh`）：

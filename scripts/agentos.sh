@@ -31,6 +31,8 @@ usage() {
 用法: $(basename "$0") <command> [args...]
 
 Commands:
+  up                                           一個指令接上（沒跑就自動起 server）
+  down                                         停掉 server
   run [--executor litellm|claude-code] <task>  同步執行任務
   blackboard-read <key_prefix>                 讀黑板上最新一筆
   blackboard-write <key> <json>                寫一筆到黑板
@@ -228,6 +230,31 @@ cmd_health() {
     curl -s "$BASE/health" | jq .
 }
 
+# ── up / down: 一個指令接上（idempotent）──────────────────────────────────────
+_alive() { curl -s -m 2 "$BASE/health" 2>/dev/null | grep -q '"ok"'; }
+
+cmd_up() {
+    local root log
+    root="$(cd "$SCRIPT_DIR/.." && pwd)"
+    log="${AGENTOS_LOG:-$HOME/.agentos/server.log}"
+    mkdir -p "$(dirname "$log")"
+    if _alive; then echo "● AgentOS 已在跑 ($BASE)"; return 0; fi
+    echo "▶ 啟動 AgentOS server…"
+    ( cd "$root" && nohup .venv/bin/uvicorn api.main:app --port 8000 > "$log" 2>&1 & )
+    for _ in $(seq 1 30); do sleep 0.5; _alive && break; done
+    if _alive; then
+        echo "● 接上了 ($BASE)"
+        echo "  用法：$(basename "$0") run \"任務\" | knowledge-read <k> | executors"
+        echo "  自修復 daemon（選用）：scripts/heartbeat-daemon.sh start"
+    else
+        echo "✗ 起不來，看 log：$log" >&2; exit 1
+    fi
+}
+
+cmd_down() {
+    lsof -ti:8000 2>/dev/null | xargs kill -9 2>/dev/null && echo "■ AgentOS 已停" || echo "沒在跑"
+}
+
 # ── main dispatch ──────────────────────────────────────────────────────────
 main() {
     if [[ $# -eq 0 ]]; then
@@ -248,6 +275,8 @@ main() {
         protocol) cmd_protocol "$@" ;;
         executors) cmd_executors "$@" ;;
         health) cmd_health "$@" ;;
+        up) cmd_up "$@" ;;
+        down) cmd_down "$@" ;;
         *)
             echo "❌ 未知指令: $cmd" >&2
             echo "使用 --help 查看可用指令。" >&2

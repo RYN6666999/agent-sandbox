@@ -30,7 +30,7 @@ _MODULE_REF = re.compile(r"\b(orchestrator/\w+\.py|tests/test_\w+\.py|router/\w+
 
 
 def test_doc_file_map_points_at_real_files():
-    docs = ["README.md", "PROJECT.md", ".scream-code/handoff-next-session.md"]
+    docs = ["README.md", "PROJECT.md", "AGENTS.md", ".scream-code/handoff-next-session.md"]
     missing: list[str] = []
     for doc in docs:
         for ref in set(_MODULE_REF.findall(_read(doc))):

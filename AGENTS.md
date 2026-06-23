@@ -14,17 +14,15 @@
 
 完整定位與架構見 [PROJECT.md](PROJECT.md)。
 
-## 接上它（30 秒 runbook）
+## 接上它（一個指令）
 
 ```bash
-# 1. 啟後端（agent 只需要這個；要連 UI 才用 ./dev.sh）
 cd ~/agent-sandbox
-.venv/bin/uvicorn api.main:app --port 8000   # 或 ./dev.sh（含前端）
-
-# 2. 確認活著
-curl -s localhost:8000/health                 # {"ok":true} = 連上了
-./scripts/agentos.sh health                   # 同上，client 版
+./scripts/agentos.sh up      # 沒跑就自動起 server + 接上；已跑就直接用（idempotent）
 ```
+
+就這樣。`up` 會啟動後端、等它活、印出「接上了」。要連前端 UI 才另跑 `./dev.sh`。
+（底層等同 `.venv/bin/uvicorn api.main:app --port 8000` + `curl localhost:8000/health`。）
 
 ## 怎麼呼叫（二選一，同一個後端）
 

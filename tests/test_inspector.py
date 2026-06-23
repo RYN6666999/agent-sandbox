@@ -27,13 +27,13 @@ from contracts.task_spec import TaskSpec
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _make_pytest_stdout(failed: list[str], passed_count: int = 10) -> str:
-    """組一個 pytest -v --tb=no 風格的輸出字串。
+    """組一個 pytest short-summary 風格的輸出字串（真實格式：FAILED 在前）。
 
     failed: 失敗測試名清單，格式 "tests/test_foo.py::test_bar"
     """
     lines = []
     for name in failed:
-        lines.append(f"{name} FAILED")
+        lines.append(f"FAILED {name}")
     for i in range(passed_count):
         lines.append(f"tests/test_dummy.py::test_pass_{i} PASSED")
     if failed:
@@ -348,3 +348,35 @@ class TestPytestTimeout:
                 pytest.fail(f"run_inspection raised exception on timeout: {exc}")
 
         assert result is not None
+
+
+# ── REAL pytest 整合測試（堵住合成格式盲區）───────────────────────────────────
+#
+# 上面所有測試都餵「合成的」pytest 輸出 → 曾經把一個真 bug 遮了很久：
+# _run_pytest 用 `-v ... -q`（-q 抵消 -v）跑出 normal 模式，summary 是
+# `FAILED <path>`，但 regex 只配 `-v` 的 `<path> FAILED`，永遠不命中 →
+# inspector 偵測形同 no-op。合成 fixture 用對的格式才綠，騙過了所有人。
+# 這個測試真跑 pytest，端到端，確保偵測對真實輸出有效。
+
+def test_run_inspection_detects_real_pytest_failure(tmp_db, tmp_path):
+    from orchestrator import inspector, task_queue
+
+    tests_dir = tmp_path / "seeded"
+    tests_dir.mkdir()
+    (tests_dir / "test_seeded.py").write_text(
+        "def test_passes():\n"
+        "    assert 1 + 1 == 2\n\n"
+        "def test_real_regression():\n"
+        "    assert sum([2, 3]) == 6  # 5 != 6\n",
+        encoding="utf-8",
+    )
+
+    result = inspector.run_inspection(tests_dir=str(tests_dir))
+
+    assert result["total_failed"] == 1, f"real failure not detected: {result}"
+    assert result["pushed"] == 1
+    assert any("test_real_regression" in fp for fp in result["fingerprints_pushed"])
+    # 任務真的進了佇列，且是 source="A" 的 pending
+    rows = task_queue.list_all(limit=5)
+    assert any(r["status"] == "pending" and r.get("notes", {}).get("source") == "A"
+               for r in rows)

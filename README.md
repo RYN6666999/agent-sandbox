@@ -110,13 +110,15 @@ chmod +x scripts/agentos.sh
 # 定期喚醒 inspector + runner，系統自己跑
 python -m orchestrator.heartbeat --interval 300   # 每 5 分鐘一拍
 python -m orchestrator.heartbeat --once           # 只跑一拍（除錯）
+
+# 或用 daemon 控制器（含 Brave preflight、log、status）：
+scripts/heartbeat-daemon.sh start    # 實跑設置 + 觀察見 docs/heartbeat-daemon.md
 ```
 
 ### 測試
 
 ```bash
-pytest tests/
-# 348 passed（21 個測試檔）
+pytest tests/   # 跑了就知道幾個過，CI 也會自動跑
 ```
 
 ---
@@ -160,7 +162,7 @@ super-engine/
   ask.ts                    # One-shot CLI 模式（備用）
 data/
   settings.json             # 執行期設定（模型、executor、GBrain 等）
-tests/                      # 348 tests，涵蓋所有模組
+tests/                      # 全模組測試（跑 pytest 看數，CI 守）
 ```
 
 ---
@@ -250,6 +252,6 @@ Bug 修復記錄 → [BUGFIX.md](BUGFIX.md)
 
 ## 狀態
 
-**v3 架構完整實作，348 tests 通過。**
+**v3 架構完整實作，全測試綠（CI 自動守）。**
 Scream 主導計劃與執行、Claude CLI 專責驗收、AgentOS 純 Action 回圈層已上線。
 Scheduler（自修復迴圈）已閉環：心跳 daemon 定期喚醒巡檢器 + runner，系統會自己跑。

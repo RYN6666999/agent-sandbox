@@ -160,6 +160,7 @@ Postgres、Redis、Docker、雲端服務（資料隱私 + 降複雜度）。
 - `orchestrator/task_queue.py` — SQLite 佇列 + 狀態機（pending→running→passed/escalated/dead）+ `cost_ledger` 持久化油表
 - `orchestrator/runner.py` — `run_loop()` 三停六分支；重啟後從 DB 重建油表
 - `orchestrator/inspector.py` — A 巡檢器：跑本地 pytest，失敗去重後產任務入佇列（source="A"）
+- `orchestrator/repair.py` — **真實自修復**：讀失敗測試 + 其 local-import source → LLM 出完整修正檔 → 寫回 repo → 跑真 repo pytest + 全套回歸守 → 失敗即 revert（紅線：不改測試、不出 repo、不留髒）。runner 對 source="A" 任務委派它。
 - `orchestrator/heartbeat.py` — Trigger 心跳 daemon：`run_once()` / `run_forever()`，定期喚醒 inspector + runner
 - `orchestrator/auto_consolidate.py` — Session D：verify verdict → 一條 gene/ experience，`/task/verify` 後 best-effort 寫 brain（pass→pattern / escalate→bug-fix，skip retry）
 - `protocols/` — **協議模板庫**（13 份 agent 交互提示詞模板：handoff-opus / delegate-claude-code / delegate-subagent / record-session / review-request / task-breakdown / progress-report / write-protocol / agnes-multimodal / consolidate-experience / military-grade-sdlc / search-web / skill-bridge）

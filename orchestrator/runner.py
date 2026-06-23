@@ -108,6 +108,15 @@ def run_one(
                attempt_count=attempt_count)
         return "escalated", spent_usd
 
+    # ── Repair tasks (inspector source="A"): edit repo source, not code blobs ──
+    # The generic make→verify path below grades self-contained blobs; a repo test
+    # failure needs the real repair engine (reads + writes repo files, re-runs the
+    # actual test). Delegate and return a queue-compatible (status, cost).
+    fingerprint = (spec.io_example or {}).get("input", "")
+    if spec.why.startswith("修復失敗測試") and "::" in fingerprint:
+        return _run_repair_task(task_id, fingerprint, spent_usd,
+                                global_budget_usd, effective_max_rounds)
+
     prev_score: float | None = None
     prev_prev_score: float | None = None
     local_cost: float = 0.0  # 本任務本次 attempt 累計成本
@@ -233,6 +242,52 @@ def run_one(
            round_n=effective_max_rounds, score=prev_score)
     ledger_update_task_cost(task_id, local_cost)
     return "escalated", spent_usd + local_cost
+
+
+def _run_repair_task(
+    task_id: str,
+    fingerprint: str,
+    spent_usd: float,
+    global_budget_usd: float,
+    max_rounds: int,
+) -> tuple[str, float]:
+    """Delegate a repair task to orchestrator.repair (edits repo source, verifies
+    with the REAL repo pytest). Maps the RepairResult onto the queue state machine."""
+    if spent_usd >= global_budget_usd:
+        task_queue.update_status(task_id, "escalated", feedback="global budget exhausted",
+                                 notes={"reason": "global_budget", "spent_usd": spent_usd})
+        _audit(task_id, "escalated", reason="global_budget", spent_usd=spent_usd)
+        return "escalated", spent_usd
+
+    from orchestrator import repair
+    from orchestrator.maker import _load_settings
+    repo_root = Path(__file__).parent.parent
+    model = _load_settings().get("maker_model", "")
+    try:
+        res = repair.repair_task(fingerprint, model=model, repo_root=repo_root, max_rounds=max_rounds)
+    except Exception as exc:
+        logger.error("[runner] task=%s repair raised: %s", task_id, exc)
+        task_queue.update_status(task_id, "escalated", score=0.0,
+                                 feedback=f"repair raised: {exc}",
+                                 notes={"reason": "repair_exception", "error": str(exc)})
+        _audit(task_id, "escalated", reason="repair_exception", error=str(exc))
+        return "escalated", spent_usd
+
+    if res.cost_usd > 0:
+        ledger_insert(task_id, res.rounds, res.cost_usd, cost_known=True, reason="repair")
+        ledger_update_task_cost(task_id, res.cost_usd)
+
+    if res.status == "passed":
+        task_queue.update_status(task_id, "passed", score=10.0, feedback=res.feedback,
+                                 notes={"reason": "repaired", "target": res.target, "rounds": res.rounds})
+        _audit(task_id, "passed", reason="repaired", target=res.target, rounds=res.rounds)
+    else:
+        task_queue.update_status(task_id, "escalated", score=2.0, feedback=res.feedback,
+                                 notes={"reason": "repair_failed", "rounds": res.rounds})
+        _audit(task_id, "escalated", reason="repair_failed", rounds=res.rounds)
+    logger.info("[runner] task=%s repair %s (target=%s rounds=%d cost=$%.5f)",
+                task_id, res.status, res.target, res.rounds, res.cost_usd)
+    return res.status, spent_usd + res.cost_usd
 
 
 # ── 批次 Runner ──────────────────────────────────────────────────────────────

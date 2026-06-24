@@ -77,6 +77,8 @@ def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTOS_DECISIONS_DB_PATH", str(db_decision))
     from orchestrator import task_queue
     from orchestrator import decision_log
+    task_queue._SCHEMA_ENSURED_FOR_PATH = ""
+    decision_log._SCHEMA_ENSURED_FOR_PATH = ""
     task_queue.ensure_schema()
     decision_log.ensure_schema()
     yield tmp_path

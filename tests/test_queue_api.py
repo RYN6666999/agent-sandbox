@@ -45,6 +45,7 @@ def tmp_db(tmp_path, monkeypatch):
     db_path = tmp_path / "test_queue_api.db"
     monkeypatch.setenv("AGENTOS_TASK_QUEUE_DB_PATH", str(db_path))
     from orchestrator import task_queue
+    task_queue._SCHEMA_ENSURED_FOR_PATH = ""
     task_queue.ensure_schema()
     yield db_path
 

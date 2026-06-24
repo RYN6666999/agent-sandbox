@@ -18,9 +18,12 @@ Usage:
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
+import re
 import sqlite3
+import sys
 import threading
 import urllib.request
 import urllib.error
@@ -35,17 +38,19 @@ except ImportError:
     _HAS_JIEBA = False
 
 _DB_LOCK = threading.Lock()
+_SCHEMA_ENSURED_FOR_PATH: str = ""
 
 # ── GBrain integration ──────────────────────────────────────────────────────────
 
 _GBRAIN_DEFAULT_URL = "http://localhost:3457"
+_GBRAIN_CONFIG_CACHE: dict[str, Any] | None = None
 
 
 def _load_gbrain_config() -> dict[str, Any]:
-    """Read gbrain settings from data/settings.json.
-
-    Returns {"url": "http://...", "enabled": True, "token": "..."} or disabled config.
-    """
+    """Read gbrain settings from data/settings.json. Cached after first read."""
+    global _GBRAIN_CONFIG_CACHE
+    if _GBRAIN_CONFIG_CACHE is not None:
+        return _GBRAIN_CONFIG_CACHE
     settings_path = Path(__file__).parent.parent / "data" / "settings.json"
     try:
         if settings_path.exists():
@@ -53,14 +58,16 @@ def _load_gbrain_config() -> dict[str, Any]:
             cfg = json.loads(raw)
             gbrain = cfg.get("gbrain", {})
             if gbrain.get("enabled", False):
-                return {
+                _GBRAIN_CONFIG_CACHE = {
                     "url": gbrain.get("url", _GBRAIN_DEFAULT_URL),
                     "token": gbrain.get("token", ""),
                     "enabled": True,
                 }
+                return _GBRAIN_CONFIG_CACHE
     except Exception:
         pass
-    return {"url": _GBRAIN_DEFAULT_URL, "enabled": False, "token": ""}
+    _GBRAIN_CONFIG_CACHE = {"url": _GBRAIN_DEFAULT_URL, "enabled": False, "token": ""}
+    return _GBRAIN_CONFIG_CACHE
 
 
 def _gbrain_request(
@@ -84,7 +91,7 @@ def _gbrain_request(
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
-        print(f"[knowledge] gbrain request failed ({method} {path}): {exc}", file=__import__('sys').stderr)
+        print(f"[knowledge] gbrain request failed ({method} {path}): {exc}", file=sys.stderr)
         return None
 
 
@@ -144,7 +151,7 @@ def _gbrain_read(key: str, limit: int = 5) -> list[dict[str, Any]]:
                     "source": "gbrain",
                 }]
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
-        print(f"[knowledge] gbrain read failed for key={key}: {exc}", file=__import__('sys').stderr)
+        print(f"[knowledge] gbrain read failed for key={key}: {exc}", file=sys.stderr)
     return []
 
 
@@ -181,7 +188,7 @@ def _gbrain_search(query: str, limit: int = 5) -> list[dict[str, Any]]:
                     })
             return results
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
-        print(f"[knowledge] gbrain search failed for query={query}: {exc}", file=__import__('sys').stderr)
+        print(f"[knowledge] gbrain search failed for query={query}: {exc}", file=sys.stderr)
     return []
 
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "knowledge.db"
@@ -270,28 +277,33 @@ def _connect() -> sqlite3.Connection:
 
 
 def ensure_schema() -> bool:
-    """Create tables, FTS virtual table, and sync triggers if they don't exist."""
+    """Create tables, FTS virtual table, and sync triggers if they don't exist.
+    Uses module-level flag to skip redundant SQLite ops after first call
+    (invalidated automatically when AGENTOS_KNOWLEDGE_DB_PATH changes).
+    """
+    global _SCHEMA_ENSURED_FOR_PATH
+    current_path = str(_db_path())
+    if _SCHEMA_ENSURED_FOR_PATH == current_path:
+        return True
     try:
-        with _DB_LOCK:
-            with _connect() as conn:
-                conn.executescript(ENTRIES_SCHEMA)
-                # FTS5 virtual table + triggers (wrapped in try/ignore for re-run safety)
-                try:
-                    conn.executescript(FTS5_SCHEMA)
-                except sqlite3.OperationalError:
-                    pass  # already exists
-                try:
-                    conn.executescript(FTS5_TRIGGERS)
-                except sqlite3.OperationalError:
-                    pass  # already exists
-                # CJK FTS5 virtual table (best-effort, may be created already)
-                try:
-                    conn.executescript(CJK_FTS5_SCHEMA)
-                except sqlite3.OperationalError:
-                    pass  # already exists
+        with _connect() as conn:
+            conn.executescript(ENTRIES_SCHEMA)
+            try:
+                conn.executescript(FTS5_SCHEMA)
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.executescript(FTS5_TRIGGERS)
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.executescript(CJK_FTS5_SCHEMA)
+            except sqlite3.OperationalError:
+                pass
+        _SCHEMA_ENSURED_FOR_PATH = current_path
         return True
     except Exception as exc:
-        print(f"[knowledge] ensure_schema failed: {exc}", file=__import__('sys').stderr)
+        print(f"[knowledge] ensure_schema failed: {exc}", file=sys.stderr)
         return False
 
 
@@ -311,12 +323,13 @@ def write_knowledge(
     """
     entry_id = uuid.uuid4().hex[:16]
     meta_json = json.dumps(metadata or {}, ensure_ascii=False)
-    now = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
+    now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
+
+    ensure_schema()  # ensure schema exists (module-level cache makes subsequent calls free)
 
     try:
         with _DB_LOCK:
             with _connect() as conn:
-                conn.executescript(ENTRIES_SCHEMA)
                 conn.execute(
                     """
                     INSERT INTO entries (id, key, content, metadata, created_at, updated_at)
@@ -340,7 +353,7 @@ def write_knowledge(
         _gbrain_write(key, content, metadata=metadata)
         return entry_id
     except Exception as exc:
-        print(f"[knowledge] write_knowledge failed for key={key}: {exc}", file=__import__('sys').stderr)
+        print(f"[knowledge] write_knowledge failed for key={key}: {exc}", file=sys.stderr)
         raise
 
 
@@ -350,10 +363,11 @@ def read_knowledge(key: str, limit: int = 20) -> list[dict[str, Any]]:
     Returns entries whose key starts with the given prefix, newest first.
     Falls back to GBrain if local results are empty and GBrain is enabled.
     """
+    ensure_schema()
+
     try:
         with _DB_LOCK:
             with _connect() as conn:
-                conn.executescript(ENTRIES_SCHEMA)
                 rows = conn.execute(
                     """
                     SELECT id, key, content, metadata, created_at, updated_at
@@ -373,7 +387,7 @@ def read_knowledge(key: str, limit: int = 20) -> list[dict[str, Any]]:
             return gbrain_results
         return local
     except Exception as exc:
-        print(f"[knowledge] read_knowledge failed for key={key}: {exc}", file=__import__('sys').stderr)
+        print(f"[knowledge] read_knowledge failed for key={key}: {exc}", file=sys.stderr)
         raise
 
 
@@ -386,6 +400,8 @@ def search_knowledge(query: str, limit: int = 10) -> list[dict[str, Any]]:
     When GBrain is enabled, results are merged with GBrain hybrid search
     results. GBrain results are appended with source='gbrain'.
     """
+    ensure_schema()
+
     try:
         with _DB_LOCK:
             with _connect() as conn:
@@ -455,16 +471,17 @@ def search_knowledge(query: str, limit: int = 10) -> list[dict[str, Any]]:
                 seen_keys.add(gr["key"])
         return merged[:limit]
     except Exception as exc:
-        print(f"[knowledge] search_knowledge failed for query={query}: {exc}", file=__import__('sys').stderr)
+        print(f"[knowledge] search_knowledge failed for query={query}: {exc}", file=sys.stderr)
         raise
 
 
 def get_knowledge(entry_id: str) -> dict[str, Any] | None:
     """Get a single knowledge entry by its ID, or None if not found."""
+    ensure_schema()
+
     try:
         with _DB_LOCK:
             with _connect() as conn:
-                conn.executescript(ENTRIES_SCHEMA)
                 row = conn.execute(
                     """
                     SELECT id, key, content, metadata, created_at, updated_at
@@ -475,7 +492,7 @@ def get_knowledge(entry_id: str) -> dict[str, Any] | None:
                 ).fetchone()
         return _row_to_dict(row) if row else None
     except Exception as exc:
-        print(f"[knowledge] get_knowledge failed for id={entry_id}: {exc}", file=__import__('sys').stderr)
+        print(f"[knowledge] get_knowledge failed for id={entry_id}: {exc}", file=sys.stderr)
         raise
 
 
@@ -516,7 +533,6 @@ def consolidate_experiences(
             content = f"{what}\n\nFix: {fix}"
 
         # Build a short slug from the first ~50 chars of what
-        import re
         slug = re.sub(r'[^a-zA-Z0-9\u4e00-\u9fff]+', '-', what.strip()[:50]).strip('-').lower()[:40]
         if not slug:
             slug = f"experience-{uuid.uuid4().hex[:8]}"
@@ -525,7 +541,7 @@ def consolidate_experiences(
         metadata = {
             "domain": domain,
             "type": exp_type,
-            "date": __import__('datetime').datetime.now(__import__('datetime').timezone.utc).strftime('%Y-%m-%d'),
+            "date": datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d'),
             "tags": exp.get("tags", []),
         }
 

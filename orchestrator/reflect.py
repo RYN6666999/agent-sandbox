@@ -31,10 +31,15 @@ class Proposal:
     autofix_path: str = ""
 
 
-def reflect_recent(n_hours: int = 24) -> list[Reflection]:
-    """Analyze recent metrics and return reflections."""
+def reflect_recent(n_hours: int = 24, metrics_dict: dict | None = None) -> list[Reflection]:
+    """Analyze recent metrics and return reflections.
+    
+    Args:
+        n_hours: lookback window in hours
+        metrics_dict: optional pre-fetched metrics (avoids extra DB read)
+    """
     reflections: list[Reflection] = []
-    m = metrics.get_metrics(since_hours=n_hours)
+    m = metrics_dict if metrics_dict is not None else metrics.get_metrics(since_hours=n_hours)
 
     # Rule 1: Any scenario with avg_score < 3.0 is critical
     for scenario_id, info in m.get("by_scenario", {}).items():
@@ -68,7 +73,7 @@ def should_propose(metrics_dict: dict | None = None) -> bool:
     """Return True if there are enough signals to build a proposal."""
     if metrics_dict is None:
         metrics_dict = metrics.get_metrics(since_hours=24)
-    reflections = reflect_recent()
+    reflections = reflect_recent(metrics_dict=metrics_dict)
     if not reflections:
         return False
     critical_count = sum(1 for r in reflections if r.severity == "critical")

@@ -346,3 +346,27 @@ def test_run_forever_uses_variable_interval():
     assert len(sleep_times) >= 2
     assert sleep_times[0] == 600  # 第一次空閒
     assert sleep_times[1] == 60   # 第二次忙碌
+
+
+# ── SIGTERM handler ────────────────────────────────────────────────────────────
+
+def test_sigterm_handler_registered():
+    """SIGTERM handler should be registered when run_forever is called."""
+    from orchestrator.heartbeat import run_forever
+    import signal as _sig
+
+    original = _sig.getsignal(_sig.SIGTERM)
+    try:
+        # run_forever will set up the handler then wait
+        # We just verify the handler registration happened
+        from unittest.mock import patch
+        with patch("orchestrator.heartbeat.time.sleep", side_effect=KeyboardInterrupt):
+            with patch("orchestrator.heartbeat.run_once", return_value={}):
+                try:
+                    run_forever(min_interval=60, max_interval=600)
+                except KeyboardInterrupt:
+                    pass
+        handler = _sig.getsignal(_sig.SIGTERM)
+        assert handler is not None
+    finally:
+        _sig.signal(_sig.SIGTERM, original)

@@ -50,6 +50,9 @@ from orchestrator import decision_log, task_queue
 from orchestrator.loop import run_verification
 from orchestrator.maker import MakeResult, make
 from orchestrator.task_queue import ledger_insert, ledger_spent_today, ledger_update_task_cost
+from orchestrator.metrics import record_eval
+from orchestrator.auto_consolidate import auto_consolidate
+from orchestrator import reflect
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +181,16 @@ def run_one(
         feedback: str = verdict["feedback"]
         v_status: str = verdict["status"]  # "pass" | "retry" | "escalate"
 
+        # ── Record eval + consolidate ─────────────────────────────────────────
+        try:
+            record_eval(spec.why[:50], verdict.get("source", "unknown"), score, verdict.get("passed", False))
+        except Exception:
+            pass  # best-effort
+        try:
+            auto_consolidate(spec, verdict)
+        except Exception:
+            pass  # best-effort
+
         logger.info("[runner] task=%s round=%d score=%.1f status=%s",
                     task_id, round_n, score, v_status)
         _audit_verify(task_id, round_n, verdict)
@@ -205,6 +218,15 @@ def run_one(
                 notes={"reason": "passed", "round_n": round_n},
             )
             _audit(task_id, "passed", reason="passed", round_n=round_n, score=score)
+            # ── 反思：檢查是否需要調整系統閾值 ──────────────────────────────────────
+            try:
+                if reflect.should_propose():
+                    proposal = reflect.build_proposal()
+                    if proposal.reflections:
+                        logger.info("[runner] reflect proposal: %s (%d reflections)",
+                                    proposal.title, len(proposal.reflections))
+            except Exception:
+                pass
             ledger_update_task_cost(task_id, local_cost)
             return "passed", spent_usd + local_cost
 

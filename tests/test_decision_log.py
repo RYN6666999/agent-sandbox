@@ -26,7 +26,8 @@ def temp_decision_db(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTOS_DECISIONS_DB_PATH", str(db_path))
     sessions.clear()
     decision_log.reset_audit_failure_count()
-    assert decision_log.ensure_schema() is True
+    decision_log._SCHEMA_ENSURED = False  # 清除 cache，讓 ensure_schema 對新的 temp 路徑生效
+    decision_log.ensure_schema()
     yield db_path
     sessions.clear()
 

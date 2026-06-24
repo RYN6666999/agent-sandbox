@@ -43,6 +43,7 @@ def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTOS_TASK_QUEUE_DB_PATH", str(db_path))
     # 確保 task_queue 模組重新讀取 env（其 _db_path() 是 function，每次呼叫都查 env）
     from orchestrator import task_queue
+    task_queue._SCHEMA_ENSURED = False  # 清除 cache，讓 ensure_schema 對新的 temp 路徑生效
     task_queue.ensure_schema()
     yield db_path
 

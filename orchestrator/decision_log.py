@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 _DB_LOCK = threading.Lock()
+_SCHEMA_ENSURED_FOR_PATH: str = ""
 _AUDIT_FAILURE_COUNT = 0
 
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "decisions.db"
@@ -105,16 +106,17 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def ensure_schema() -> bool:
-    try:
-        with _DB_LOCK:
-            with _connect() as conn:
-                conn.executescript(REQUEST_TRACE_SCHEMA)
-                conn.executescript(ROUTING_EVENTS_SCHEMA)
-        return True
-    except Exception as exc:
-        _warn(f"ensure_schema failed: {exc}")
-        return False
+def ensure_schema() -> None:
+    """Ensure schema exists. Path-aware cache skips redundant ops after first call."""
+    global _SCHEMA_ENSURED_FOR_PATH
+    current_path = str(_db_path())
+    if _SCHEMA_ENSURED_FOR_PATH == current_path:
+        return
+    with _DB_LOCK:
+        with _connect() as conn:
+            conn.executescript(REQUEST_TRACE_SCHEMA)
+            conn.executescript(ROUTING_EVENTS_SCHEMA)
+    _SCHEMA_ENSURED_FOR_PATH = current_path
 
 
 def record_request_trace(
@@ -126,10 +128,10 @@ def record_request_trace(
     latest_status: str | None = None,
     notes: dict[str, Any] | None = None,
 ) -> bool:
+    ensure_schema()
     try:
         with _DB_LOCK:
             with _connect() as conn:
-                conn.executescript(REQUEST_TRACE_SCHEMA)
                 conn.execute(
                     """
                     INSERT INTO request_trace (
@@ -158,10 +160,10 @@ def record_request_trace(
 
 
 def update_request_status(request_id: str, latest_status: str) -> bool:
+    ensure_schema()
     try:
         with _DB_LOCK:
             with _connect() as conn:
-                conn.executescript(REQUEST_TRACE_SCHEMA)
                 conn.execute(
                     "UPDATE request_trace SET latest_status = ? WHERE request_id = ?",
                     (latest_status, request_id),
@@ -284,11 +286,10 @@ def _record_routing_event(
     violations: list[str] | None,
     details: dict[str, Any] | None,
 ) -> bool:
+    ensure_schema()
     try:
         with _DB_LOCK:
             with _connect() as conn:
-                conn.executescript(REQUEST_TRACE_SCHEMA)
-                conn.executescript(ROUTING_EVENTS_SCHEMA)
                 conn.execute(
                     """
                     INSERT INTO routing_events (

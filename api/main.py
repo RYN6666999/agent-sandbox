@@ -189,6 +189,40 @@ def health():
     return {"ok": True}
 
 
+@app.get("/ready")
+def readiness():
+    """Readiness probe: checks that core databases are accessible.
+
+    Returns {"ready": True/False, "dbs": {...}}.
+    Does NOT block or raise — always returns 200 with status details.
+    """
+    from pathlib import Path as _Path
+    from orchestrator import task_queue as _tq
+    from orchestrator import knowledge as _brain
+
+    base = _Path(__file__).resolve().parent.parent  # repo root
+    dbs = {
+        "task_queue": str(base / "data" / "task_queue.db"),
+        "knowledge": str(base / "data" / "knowledge.db"),
+    }
+    db_status = {}
+    all_ok = True
+    for name, path_str in dbs.items():
+        exists = _Path(path_str).exists()
+        db_status[name] = {"exists": exists}
+        if not exists:
+            all_ok = False
+
+    try:
+        depth = _tq.queue_depth("pending")
+        db_status["queue_depth"] = depth
+    except Exception as e:
+        db_status["queue_error"] = str(e)
+        all_ok = False
+
+    return {"ready": all_ok, "dbs": db_status}
+
+
 @app.get("/settings")
 def get_settings():
     return _load_settings()

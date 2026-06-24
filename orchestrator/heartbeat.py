@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import logging
+import signal
 import sys
 import time
 from pathlib import Path
@@ -199,6 +200,15 @@ def run_forever(
         BEAT_LOG_PREFIX, current_interval, min_interval, max_interval, global_budget_usd,
     )
     beat_n = 0
+
+    # ── SIGTERM handler ─────────────────────────────────────────────────────────
+    def _handle_sigterm(signum, frame):
+        logger.warning("%s received SIGTERM, shutting down gracefully after %d beats",
+                       BEAT_LOG_PREFIX, beat_n)
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
     try:
         while True:
             try:

@@ -40,6 +40,7 @@ from typing import Any
 from contracts.task_spec import TaskSpec
 
 _DB_LOCK = threading.Lock()
+_SCHEMA_ENSURED_FOR_PATH: str = ""
 
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "task_queue.db"
 
@@ -103,11 +104,16 @@ def _connect() -> sqlite3.Connection:
 
 
 def ensure_schema() -> None:
-    """建立（或確認）資料表結構。冪等，可重複呼叫。"""
+    """建立（或確認）資料表結構。冪等，path-aware cache 使後續呼叫近乎免費。"""
+    global _SCHEMA_ENSURED_FOR_PATH
+    current_path = str(_db_path())
+    if _SCHEMA_ENSURED_FOR_PATH == current_path:
+        return
     with _DB_LOCK:
         with _connect() as conn:
             conn.executescript(_SCHEMA)
             conn.executescript(_LEDGER_SCHEMA)
+    _SCHEMA_ENSURED_FOR_PATH = current_path
 
 
 # ── 工具 ────────────────────────────────────────────────────────────────────

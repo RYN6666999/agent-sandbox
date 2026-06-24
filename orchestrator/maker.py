@@ -127,6 +127,25 @@ def _build_prompt(spec: TaskSpec, executor: str = "litellm") -> str:
     return "\n".join(parts)
 
 
+def _retrieve_brain_context(task_desc: str) -> str:
+    """Search brain for relevant past experiences. Returns formatted string or empty."""
+    if not task_desc.strip():
+        return ""
+    try:
+        from orchestrator import knowledge
+        results = knowledge.search_knowledge(task_desc[:50], limit=3)
+        if not results:
+            return ""
+        parts = ["\n\nRelevant past experiences from knowledge base:"]
+        for r in results:
+            key = r.get("key", "")
+            content = (r.get("content") or "")[:200]
+            parts.append(f"- {key}: {content}")
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
 def _call_litellm(spec: TaskSpec, *,
                   settings: dict | None = None,
                   on_token: Callable[[str], None] | None = None,
@@ -151,6 +170,12 @@ def _call_litellm(spec: TaskSpec, *,
         base = f"{_BASE_PROMPT}\n\n{user_sys}"
 
     system = build_system_prompt(triple.skills, model_alias, base)
+    
+    # Inject brain context (best-effort)
+    brain_ctx = _retrieve_brain_context(spec.why)
+    if brain_ctx:
+        system = system + brain_ctx
+    
     messages = [{"role": "system", "content": system},
                 {"role": "user", "content": _build_prompt(spec, "litellm")}]
 

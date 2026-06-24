@@ -31,6 +31,47 @@ class Proposal:
     autofix_path: str = ""
 
 
+def _brain_reflections() -> list[Reflection]:
+    """Check brain for recurring failure patterns across recent tasks.
+    
+    Rule: if brain has 3+ "撞線" or "escalate" records, flag as warning.
+    """
+    try:
+        from orchestrator import knowledge
+        results = knowledge.search_knowledge("撞線", limit=10)
+        # Also search English terms
+        eng_results = knowledge.search_knowledge("escalate", limit=5)
+        all_results = results + eng_results
+        # Deduplicate by key
+        seen_keys = set()
+        unique = []
+        for r in all_results:
+            k = r.get("key", "")
+            if k not in seen_keys:
+                seen_keys.add(k)
+                unique.append(r)
+        
+        if len(unique) >= 3:
+            return [Reflection(
+                trigger="repeated_escalation",
+                symptom=f"Brain shows {len(unique)} escalation gene records — recurring failure pattern detected",
+                category="*",
+                suggested_change="Review escalated tasks for common root causes; consider adjusting stop thresholds or routing rules",
+                severity="warning",
+            )]
+        if len(unique) >= 1:
+            return [Reflection(
+                trigger="repeated_escalation",
+                symptom=f"Brain has {len(unique)} escalation record(s) — monitor for pattern development",
+                category="*",
+                suggested_change="Monitor escalation frequency; no action needed yet",
+                severity="info",
+            )]
+    except Exception:
+        pass
+    return []
+
+
 def reflect_recent(n_hours: int = 24, metrics_dict: dict | None = None) -> list[Reflection]:
     """Analyze recent metrics and return reflections.
     
@@ -66,6 +107,10 @@ def reflect_recent(n_hours: int = 24, metrics_dict: dict | None = None) -> list[
             severity="warning",
         ))
 
+    # Brain-based reflections
+    brain_refs = _brain_reflections()
+    reflections.extend(brain_refs)
+    
     return reflections
 
 

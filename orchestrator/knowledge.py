@@ -258,6 +258,22 @@ def _tokenize_cjk(text: str) -> str:
     return text
 
 
+def _migrate_schema() -> None:
+    """Add new columns to entries table if they don't exist (SQLite ALTER compatibility)."""
+    migs = [
+        "ALTER TABLE entries ADD COLUMN related_ids TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE entries ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE entries ADD COLUMN last_hit_at TEXT",
+        "ALTER TABLE entries ADD COLUMN confidence REAL DEFAULT 1.0",
+    ]
+    for sql in migs:
+        try:
+            with _connect() as conn:
+                conn.execute(sql)
+        except Exception:
+            pass  # column already exists (SQLite throws on duplicate ALTER)
+
+
 def _db_path() -> Path:
     override = os.environ.get("AGENTOS_KNOWLEDGE_DB_PATH", "").strip()
     return Path(override) if override else DEFAULT_DB_PATH
@@ -300,6 +316,7 @@ def ensure_schema() -> bool:
                 conn.executescript(CJK_FTS5_SCHEMA)
             except sqlite3.OperationalError:
                 pass
+        _migrate_schema()
         _SCHEMA_ENSURED_FOR_PATH = current_path
         return True
     except Exception as exc:
@@ -332,10 +349,10 @@ def write_knowledge(
             with _connect() as conn:
                 conn.execute(
                     """
-                    INSERT INTO entries (id, key, content, metadata, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO entries (id, key, content, metadata, created_at, updated_at, confidence)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (entry_id, key, content, meta_json, now, now),
+                    (entry_id, key, content, meta_json, now, now, 1.0),
                 )
                 # 同步寫入 CJK FTS5 索引（使用 jieba 分詞，best-effort）
                 if _HAS_JIEBA:
@@ -357,6 +374,122 @@ def write_knowledge(
         raise
 
 
+def update_knowledge(
+    entry_id: str,
+    content: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    related_ids: list[str] | None = None,
+    confidence: float | None = None,
+) -> bool:
+    """Update specific fields of an existing entry. Only provided fields change.
+
+    Returns True if update was applied, False if entry not found.
+    """
+    ensure_schema()
+    try:
+        updates: list[str] = []
+        params: list[Any] = []
+        now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
+
+        if content is not None:
+            updates.append("content = ?")
+            params.append(content)
+        if metadata is not None:
+            updates.append("metadata = ?")
+            params.append(json.dumps(metadata, ensure_ascii=False))
+        if related_ids is not None:
+            updates.append("related_ids = ?")
+            params.append(",".join(related_ids))
+        if confidence is not None:
+            updates.append("confidence = ?")
+            params.append(max(0.0, min(1.0, confidence)))
+
+        if not updates:
+            return False
+
+        updates.append("updated_at = ?")
+        params.append(now)
+        params.append(entry_id)
+
+        sql = f"UPDATE entries SET {', '.join(updates)} WHERE id = ?"
+        with _DB_LOCK:
+            with _connect() as conn:
+                cur = conn.execute(sql, params)
+                return cur.rowcount > 0
+    except Exception as exc:
+        print(f"[knowledge] update_knowledge failed for id={entry_id}: {exc}", file=sys.stderr)
+        return False
+
+
+def record_access(entry_id: str) -> None:
+    """Record a read access: increment access_count and set last_hit_at.
+
+    Best-effort, never raises.
+    """
+    try:
+        now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
+        with _DB_LOCK:
+            with _connect() as conn:
+                conn.execute(
+                    "UPDATE entries SET access_count = access_count + 1, last_hit_at = ? WHERE id = ?",
+                    (now, entry_id),
+                )
+    except Exception:
+        pass
+
+
+def link_entries(source_id: str, target_id: str) -> bool:
+    """Create a bidirectional link between two entries.
+
+    Each entry's related_ids field is updated to include the other.
+    Returns True if both entries exist and were updated.
+    """
+    ensure_schema()
+    try:
+        with _DB_LOCK:
+            with _connect() as conn:
+                # Get current related_ids for both
+                src = conn.execute("SELECT related_ids FROM entries WHERE id=?", (source_id,)).fetchone()
+                tgt = conn.execute("SELECT related_ids FROM entries WHERE id=?", (target_id,)).fetchone()
+                if not src or not tgt:
+                    return False
+
+                src_ids = set(src[0].split(",")) if src[0] else set()
+                tgt_ids = set(tgt[0].split(",")) if tgt[0] else set()
+
+                src_ids.add(target_id)
+                tgt_ids.add(source_id)
+
+                now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f') + 'Z'
+                conn.execute("UPDATE entries SET related_ids=?, updated_at=? WHERE id=?",
+                             (",".join(sorted(src_ids)), now, source_id))
+                conn.execute("UPDATE entries SET related_ids=?, updated_at=? WHERE id=?",
+                             (",".join(sorted(tgt_ids)), now, target_id))
+                return True
+    except Exception as exc:
+        print(f"[knowledge] link_entries failed: {exc}", file=sys.stderr)
+        return False
+
+
+def get_knowledge_stats() -> dict[str, Any]:
+    """Return brain health summary."""
+    ensure_schema()
+    try:
+        with _connect() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+            linked = conn.execute("SELECT COUNT(*) FROM entries WHERE related_ids != ''").fetchone()[0]
+            never_accessed = conn.execute("SELECT COUNT(*) FROM entries WHERE access_count = 0").fetchone()[0]
+            avg_conf = conn.execute("SELECT COALESCE(AVG(confidence), 0.0) FROM entries").fetchone()[0]
+            return {
+                "total_entries": total,
+                "linked_entries": linked,
+                "never_accessed": never_accessed,
+                "avg_confidence": round(avg_conf, 2),
+            }
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
 def read_knowledge(key: str, limit: int = 20) -> list[dict[str, Any]]:
     """Search knowledge entries by key prefix.
 
@@ -370,7 +503,8 @@ def read_knowledge(key: str, limit: int = 20) -> list[dict[str, Any]]:
             with _connect() as conn:
                 rows = conn.execute(
                     """
-                    SELECT id, key, content, metadata, created_at, updated_at
+                    SELECT id, key, content, metadata, created_at, updated_at,
+                           related_ids, access_count, last_hit_at, confidence
                     FROM entries
                     WHERE key LIKE ?
                     ORDER BY created_at DESC
@@ -379,6 +513,8 @@ def read_knowledge(key: str, limit: int = 20) -> list[dict[str, Any]]:
                     (f"{key}%", limit),
                 ).fetchall()
         local = [_row_to_dict(r) for r in rows]
+        for r in local:
+            record_access(r["id"])
         if local:
             return local
         # GBrain fallback: try reading from deep memory
@@ -411,6 +547,7 @@ def search_knowledge(query: str, limit: int = 10) -> list[dict[str, Any]]:
                     rows = conn.execute(
                         """
                         SELECT e.id, e.key, e.content, e.metadata, e.created_at, e.updated_at,
+                               e.related_ids, e.access_count, e.last_hit_at, e.confidence,
                                rank
                         FROM entries_fts
                         JOIN entries e ON e.rowid = entries_fts.rowid
@@ -429,6 +566,7 @@ def search_knowledge(query: str, limit: int = 10) -> list[dict[str, Any]]:
                         rows = conn.execute(
                             """
                             SELECT e.id, e.key, e.content, e.metadata, e.created_at, e.updated_at,
+                                   e.related_ids, e.access_count, e.last_hit_at, e.confidence,
                                    rank
                             FROM entries_fts_cjk
                             JOIN entries e ON e.rowid = entries_fts_cjk.rowid
@@ -445,6 +583,7 @@ def search_knowledge(query: str, limit: int = 10) -> list[dict[str, Any]]:
                     rows = conn.execute(
                         """
                         SELECT id, key, content, metadata, created_at, updated_at,
+                               related_ids, access_count, last_hit_at, confidence,
                                NULL AS rank
                         FROM entries
                         WHERE content LIKE ? OR key LIKE ?
@@ -454,6 +593,8 @@ def search_knowledge(query: str, limit: int = 10) -> list[dict[str, Any]]:
                         (f"%{query}%", f"%{query}%", limit),
                     ).fetchall()
         local_results = [_row_to_dict(r) for r in rows]
+        for r in local_results:
+            record_access(r["id"])
 
         # GBrain hybrid search: merge with deep memory results
         gbrain_results = _gbrain_search(query, limit=limit)
@@ -484,7 +625,8 @@ def get_knowledge(entry_id: str) -> dict[str, Any] | None:
             with _connect() as conn:
                 row = conn.execute(
                     """
-                    SELECT id, key, content, metadata, created_at, updated_at
+                    SELECT id, key, content, metadata, created_at, updated_at,
+                           related_ids, access_count, last_hit_at, confidence
                     FROM entries
                     WHERE id = ?
                     """,

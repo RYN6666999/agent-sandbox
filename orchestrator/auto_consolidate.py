@@ -45,32 +45,52 @@ def _word_overlap(a: str, b: str) -> float:
     return len(words_a & words_b) / len(words_a | words_b)
 
 
+def _detect_domain(task: str) -> str:
+    """Detect knowledge domain from task description."""
+    if not task:
+        return "workflow"
+    task_lower = task.lower()
+    if any(kw in task_lower for kw in ["修復", "fix", "bug", "錯誤", "測試失敗", "failing", "broken"]):
+        return "debugging"
+    if any(kw in task_lower for kw in ["設定", "config", "部署", "deploy", "install"]):
+        return "architecture"
+    if any(kw in task_lower for kw in ["程式", "函式", "class", "implement", "寫一個", "create", "function", "module"]):
+        return "coding"
+    if any(kw in task_lower for kw in ["測試", "test", "pytest", "unittest"]):
+        return "testing"
+    return "workflow"
+
+
 def _is_similar(existing_entry: dict, new_exp: dict) -> bool:
-    """Check if an existing brain entry and a new experience are similar enough
-    to skip writing a duplicate gene.
+    """Check if a new experience is similar enough to an existing entry to skip.
     
-    Simple heuristic: compare the 'what' field (first 80 chars) of the new exp
-    against the existing entry's content. If they share significant overlap
-    (same task type, similar description), treat as duplicate.
+    Two-tier detection:
+    1. Key-based: if the new exp generates the same gene key → definitely duplicate
+    2. Content-based: text overlap fallback
     """
     existing_content = (existing_entry.get("content") or "").strip()
     new_what = (new_exp.get("what") or "").strip()
+    existing_entry_key = (existing_entry.get("key") or "")
     
     if not existing_content or not new_what:
         return False
     
-    # Extract task description part (after the colon)
+    # Tier 1: Key-based dedup — if the new exp's key already exists, it's a duplicate
+    # (The key is built from the what content, so same what → same key)
+    if existing_entry_key.startswith("gene/"):
+        import re as _re
+        new_slug = _re.sub(r'[^a-zA-Z0-9\u4e00-\u9fff]+', '-', new_what.strip()[:50]).strip('-').lower()[:40]
+        if new_slug and new_slug in existing_entry_key:
+            return True
+    
+    # Tier 2: Content overlap
     existing_task = existing_content.split(":", 1)[-1].strip() if ":" in existing_content else existing_content
     new_task = new_what.split(":", 1)[-1].strip() if ":" in new_what else new_what
-    
-    # If same task keyword (first 40 chars of task description), treat as similar
-    existing_key = existing_task[:40].strip().lower()
-    new_key = new_task[:40].strip().lower()
-    
-    if not existing_key or not new_key:
+    ex_key = existing_task[:60].strip().lower()
+    nw_key = new_task[:60].strip().lower()
+    if not ex_key or not nw_key:
         return False
-    
-    return existing_key == new_key or _word_overlap(existing_key, new_key) > 0.6
+    return ex_key == nw_key or _word_overlap(ex_key, nw_key) > 0.4
 
 
 def verdict_to_experience(spec: TaskSpec, verdict: dict[str, Any]) -> dict[str, Any] | None:
@@ -89,15 +109,32 @@ def verdict_to_experience(spec: TaskSpec, verdict: dict[str, Any]) -> dict[str, 
 
     if status == "pass":
         exp_type = "pattern"
-        what = f"任務通過驗收 (score {score}, via {source}): {task}"
+        extra = ""
+        if spec.io_example and spec.io_example.get("input"):
+            inp = str(spec.io_example["input"])
+            if len(inp) > 60:
+                inp = inp[:60] + "..."
+            extra = f" | input: {inp}"
+        what = f"✅ 通過 (s={score}, {source}) {task[:100]}{extra}"
         fix = ""
+        domain = _detect_domain(task)
     else:  # escalate
         exp_type = "bug-fix"
-        what = f"任務撞線需人介入 (score {score}, via {source}): {task}"
-        fix = verdict.get("feedback") or ""
+        what = f"❌ 撞線 (s={score}, {source}) {task[:100]}"
+        # Better fix: include feedback and fingerprint if available
+        fix_parts = []
+        fb = verdict.get("feedback") or ""
+        if fb and fb.strip():
+            fix_parts.append(fb.strip()[:300])
+        if spec.io_example and spec.io_example.get("input"):
+            inp = str(spec.io_example["input"])
+            if len(inp) < 120:
+                fix_parts.append(f"target: {inp}")
+        fix = " | ".join(fix_parts) if fix_parts else ""
+        domain = "workflow"
 
     exp = {
-        "domain": "workflow",
+        "domain": domain,
         "type": exp_type,
         "what": what,
         "fix": fix,
@@ -105,17 +142,18 @@ def verdict_to_experience(spec: TaskSpec, verdict: dict[str, Any]) -> dict[str, 
     }
 
     # ── 合併偵測：查腦庫是否有相似基因 ──────────────────────────────────────
-    # 從 task 中萃取關鍵詞用於搜尋
+    # 先用 gene/ prefix + keywords 搜尋，提高中文命中率
     keywords = task[:50].strip().lower()
     if keywords:
         try:
             from orchestrator import knowledge
-            existing = knowledge.search_knowledge(
-                keywords[:30], limit=3
-            )
+            # 搜尋 gene/ 目錄下是否有相似條目
+            existing = knowledge.search_knowledge(keywords[:30], limit=5)
+            if not existing:
+                # 也試 gene prefix
+                existing = knowledge.read_knowledge("gene/", limit=20)
             for entry in existing:
                 if _is_similar(entry, exp):
-                    # 相似內容已存在，不回傳（auto_consolidate 就不會寫入）
                     return None
         except Exception:
             pass  # best-effort, 搜尋失敗仍允許寫入
@@ -127,12 +165,15 @@ def prune_knowledge(
     max_entries: int | None = None,
     max_age_days: int | None = None,
 ) -> dict[str, Any]:
-    """Prune the knowledge base: remove oldest entries if over capacity.
+    """Prune the knowledge base: age-based + capacity-based.
+    
+    Strategy:
+    1. Remove entries older than max_age_days (keep architecture decisions)
+    2. If still over max_entries, remove lowest-confidence, least-accessed, oldest
     
     Returns a dict with pruning stats (or empty dict on failure).
     Never raises.
     """
-    # Read module constants at call time so monkeypatches in tests take effect
     if max_entries is None:
         max_entries = PRUNE_MAX_ENTRIES
     if max_age_days is None:
@@ -140,37 +181,44 @@ def prune_knowledge(
 
     try:
         from orchestrator import knowledge
-        from datetime import datetime, timezone
-        
-        stats = {"removed": 0, "reason": ""}
-        
-        # 取得總條目數
+        stats: dict[str, Any] = {"removed": 0, "age_removed": 0, "capacity_removed": 0, "reason": ""}
+
         db_path = knowledge.get_db_path()
-        import sqlite3
-        conn = sqlite3.connect(db_path)
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(db_path)
         try:
+            # Step 1: Age-based — remove entries older than max_age_days
+            # (Keep architecture decisions forever — they don't stale)
+            if max_age_days > 0:
+                cur = conn.execute("""
+                    DELETE FROM entries
+                    WHERE created_at < datetime('now', '-' || ? || ' days')
+                      AND (json_extract(metadata, '$.domain') IS NULL
+                           OR json_extract(metadata, '$.domain') != 'architecture')
+                """, (max_age_days,))
+                stats["age_removed"] = cur.rowcount
+                stats["removed"] += cur.rowcount
+
+            # Step 2: Capacity-based — if still over max_entries, remove worst entries
             count = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
-            if count <= max_entries:
-                stats["reason"] = f"within limit ({count}/{max_entries})"
-                return stats
-            
-            excess = count - max_entries
-            # 刪除最舊的 excess 條目
-            conn.execute("""
-                DELETE FROM entries
-                WHERE rowid IN (
-                    SELECT rowid FROM entries
-                    ORDER BY created_at ASC
-                    LIMIT ?
-                )
-            """, (excess,))
+            if count > max_entries:
+                excess = count - max_entries
+                cur = conn.execute("""
+                    DELETE FROM entries
+                    WHERE rowid IN (
+                        SELECT rowid FROM entries
+                        ORDER BY confidence ASC, access_count ASC, created_at ASC
+                        LIMIT ?
+                    )
+                """, (excess,))
+                stats["capacity_removed"] = cur.rowcount
+                stats["removed"] += cur.rowcount
+
             conn.commit()
-            stats["removed"] = conn.total_changes
-            stats["reason"] = f"pruned {excess} oldest entries ({count}→{count-excess})"
+            stats["reason"] = f"age:{stats['age_removed']} capacity:{stats['capacity_removed']}"
+            return stats
         finally:
             conn.close()
-        
-        return stats
     except Exception:
         return {"removed": 0, "reason": "prune failed"}
 

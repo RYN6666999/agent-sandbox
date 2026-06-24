@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import signal
 import sys
+import random as _random
 import time
 from pathlib import Path
 from typing import Any
@@ -167,6 +168,16 @@ def run_once(
             task_queue.ledger_spent_today(),
             global_budget_usd,
         )
+
+    # ── 定期 prune 腦庫（機率觸發，~每 50 拍約 ~4 小時一次） ───────────────────
+    if _random.random() < 0.02:
+        try:
+            from orchestrator.auto_consolidate import prune_knowledge as _prune
+            result_p = _prune()
+            if result_p.get("removed", 0):
+                logger.info("%s pruned %d stale brain entries", BEAT_LOG_PREFIX, result_p["removed"])
+        except Exception:
+            pass
 
     return {
         "beat_n": beat_n,

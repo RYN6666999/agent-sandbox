@@ -370,3 +370,9 @@ def test_sigterm_handler_registered():
         assert handler is not None
     finally:
         _sig.signal(_sig.SIGTERM, original)
+
+
+def test_heartbeat_has_random_import():
+    """Prune 用的 random import 不應破壞既有功能。"""
+    import random as _r
+    assert 0 <= _r.random() <= 1

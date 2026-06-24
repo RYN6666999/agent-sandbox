@@ -29,3 +29,29 @@ class TestReflect:
         p = reflect.build_proposal(rs)
         assert p.reflections == rs
         assert p.autofix_possible is False  # no "threshold" in suggestion
+
+
+def test_brain_reflections_returns_list():
+    """_brain_reflections should always return a list."""
+    from orchestrator.reflect import _brain_reflections
+    from unittest.mock import patch
+
+    with patch("orchestrator.knowledge.search_knowledge", return_value=[]):
+        refs = _brain_reflections()
+    assert isinstance(refs, list)
+
+
+def test_brain_reflections_returns_warning_when_frequent():
+    """3+ escalation records → warning reflection."""
+    from orchestrator.reflect import _brain_reflections
+    from unittest.mock import patch
+
+    fake_results = [
+        {"key": "gene/workflow/escalate-1", "content": "撞線記錄 1"},
+        {"key": "gene/workflow/escalate-2", "content": "撞線記錄 2"},
+        {"key": "gene/workflow/escalate-3", "content": "撞線記錄 3"},
+    ]
+    with patch("orchestrator.knowledge.search_knowledge", return_value=fake_results):
+        refs = _brain_reflections()
+    assert len(refs) >= 1
+    assert refs[0].severity == "warning"

@@ -38,9 +38,44 @@ from orchestrator import task_queue
 # ── 常數 ─────────────────────────────────────────────────────────────────────
 
 DEFAULT_INTERVAL_SECONDS: int = 300   # 每拍間隔：5 分鐘
+
+# ── 可變頻率 ─────────────────────────────────────────────────────────────────
+DEFAULT_MIN_INTERVAL: int = 60     # 佇列忙碌時最短間隔（秒）
+DEFAULT_MAX_INTERVAL: int = 600    # 佇列空閒時最長間隔（秒）
+INTERVAL_QUEUE_THRESHOLD: int = 3  # 超過此深度視為忙碌
+
 BEAT_LOG_PREFIX: str = "[heartbeat]"
 
 logger = logging.getLogger(__name__)
+
+
+def _calculate_interval(
+    queue_depth: int,
+    min_interval: int = DEFAULT_MIN_INTERVAL,
+    max_interval: int = DEFAULT_MAX_INTERVAL,
+    queue_threshold: int = INTERVAL_QUEUE_THRESHOLD,
+) -> int:
+    """根據佇列深度計算下次心跳間隔。
+
+    queue_depth >= threshold -> min_interval（最快）
+    queue_depth == 0         -> max_interval（最慢）
+    中間值線性插值。
+    """
+    if queue_depth >= queue_threshold:
+        return min_interval
+    if queue_depth <= 0:
+        return max_interval
+    ratio = queue_depth / queue_threshold
+    return max_interval - int((max_interval - min_interval) * ratio)
+
+
+def _get_queue_depth() -> int:
+    """Read current queue depth safely. Returns 0 on error."""
+    try:
+        from orchestrator import task_queue as _tq
+        return _tq.queue_depth("pending")
+    except Exception:
+        return 0
 
 
 # ── 單拍邏輯 ─────────────────────────────────────────────────────────────────
@@ -86,6 +121,8 @@ def run_once(
             "inspection": None,
             "loop": None,
             "budget_exhausted_post": True,
+            "queue_depth": 0,
+            "next_interval": 0,  # outside caller decides
         }
 
     logger.info(
@@ -137,6 +174,7 @@ def run_once(
         "inspection": inspection,
         "loop": loop,
         "budget_exhausted_post": budget_exhausted_post,
+        "queue_depth": _get_queue_depth(),
     }
 
 
@@ -146,6 +184,8 @@ def run_forever(
     *,
     interval: int = DEFAULT_INTERVAL_SECONDS,
     global_budget_usd: float = GLOBAL_BUDGET_USD,
+    min_interval: int = DEFAULT_MIN_INTERVAL,
+    max_interval: int = DEFAULT_MAX_INTERVAL,
 ) -> None:
     """無限心跳 daemon。
 
@@ -153,21 +193,35 @@ def run_forever(
     預算耗盡時繼續睡（不 exit），等 localtime 跨日 cost_ledger 歸零後自然復活。
     KeyboardInterrupt / SIGTERM 正常結束。
     """
+    current_interval = interval
     logger.info(
-        "%s daemon started (interval=%ds, budget=%.2f)",
-        BEAT_LOG_PREFIX, interval, global_budget_usd,
+        "%s daemon started (initial_interval=%ds, min=%ds, max=%ds, budget=%.2f)",
+        BEAT_LOG_PREFIX, current_interval, min_interval, max_interval, global_budget_usd,
     )
     beat_n = 0
     try:
         while True:
             try:
-                run_once(global_budget_usd=global_budget_usd, beat_n=beat_n)
+                result = run_once(global_budget_usd=global_budget_usd, beat_n=beat_n)
+                # 根據佇列深度調整下次間隔
+                queue_depth = _get_queue_depth()
+                new_interval = _calculate_interval(
+                    queue_depth, min_interval=min_interval, max_interval=max_interval,
+                )
+                if new_interval != current_interval:
+                    logger.info(
+                        "%s beat #%d — interval adjusted: %ds -> %ds (queue_depth=%d)",
+                        BEAT_LOG_PREFIX, beat_n, current_interval, new_interval, queue_depth,
+                    )
+                    current_interval = new_interval
             except Exception:
                 # 單拍異常不能讓 daemon 掛掉：記錯誤繼續 sleep
                 logger.exception("%s beat #%d raised unexpected exception", BEAT_LOG_PREFIX, beat_n)
             beat_n += 1
-            logger.info("%s sleeping %ds until next beat #%d", BEAT_LOG_PREFIX, interval, beat_n)
-            time.sleep(interval)
+            logger.info(
+                "%s sleeping %ds until next beat #%d", BEAT_LOG_PREFIX, current_interval, beat_n,
+            )
+            time.sleep(current_interval)
     except KeyboardInterrupt:
         logger.info("%s daemon stopped by KeyboardInterrupt after %d beats", BEAT_LOG_PREFIX, beat_n)
     except SystemExit:
@@ -197,6 +251,14 @@ if __name__ == "__main__":
         help=f"全局油表上限 USD（預設 {GLOBAL_BUDGET_USD}）",
     )
     parser.add_argument(
+        "--min-interval", type=int, default=DEFAULT_MIN_INTERVAL,
+        help=f"最短心跳間隔秒數（預設 {DEFAULT_MIN_INTERVAL}）",
+    )
+    parser.add_argument(
+        "--max-interval", type=int, default=DEFAULT_MAX_INTERVAL,
+        help=f"最長心跳間隔秒數（預設 {DEFAULT_MAX_INTERVAL}）",
+    )
+    parser.add_argument(
         "--once", action="store_true",
         help="只跑一拍就結束（除錯用）",
     )
@@ -208,4 +270,7 @@ if __name__ == "__main__":
         print(_json.dumps(result, indent=2, ensure_ascii=False))
         sys.exit(0)
     else:
-        run_forever(interval=args.interval, global_budget_usd=args.budget)
+        run_forever(
+            interval=args.interval, global_budget_usd=args.budget,
+            min_interval=args.min_interval, max_interval=args.max_interval,
+        )

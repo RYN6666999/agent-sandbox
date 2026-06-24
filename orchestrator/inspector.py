@@ -41,6 +41,10 @@ STDOUT_MAX: int = 8000             # 保留的 pytest 輸出上限（字元）
 TESTS_DIR: str = "tests"           # 預設跑的目錄，可被 run_inspection 覆蓋
 TASK_MAX_ROUNDS: int = 3           # A 自動產任務的 max_rounds（修測試比生 code 容易）
 
+# 去抖：連續幾次都紅才產任務（防 flaky test 浪費配額）
+DEBOUNCE_THRESHOLD: int = 2
+_DEBOUNCE_COUNTER: dict[str, int] = {}  # fingerprint → consecutive_failures
+
 # 解析 pytest「short test summary info」裡的失敗測試名。
 # 格式：FAILED tests/test_foo.py::test_bar  （FAILED 在前，路徑在後）
 # 這行在 -q / normal / -v 各模式的 summary 區都會出現，不依賴 verbosity。
@@ -200,6 +204,11 @@ def run_inspection(
     # ── 2. 解析失敗測試名 ──────────────────────────────────────────────────────
     failed_tests = _parse_failed_tests(pytest_result["stdout"])
 
+    # 清理去抖 counter：本次沒出現的 fingerprint 不再連續（全綠／部分紅都適用）
+    for fp in list(_DEBOUNCE_COUNTER.keys()):
+        if fp not in failed_tests:
+            del _DEBOUNCE_COUNTER[fp]
+
     # 全綠：exit_code == 0，不產任務
     if not failed_tests:
         return {
@@ -215,10 +224,11 @@ def run_inspection(
             "fingerprints_skipped": [],
         }
 
-    # ── 3 + 4. 去重 + 產任務 ──────────────────────────────────────────────────
+    # ── 3 + 4. 去重 + 去抖 + 產任務 ──────────────────────────────────────────
     task_ids: list[str] = []
     pushed_fps: list[str] = []
     skipped_fps: list[str] = []
+    debounced_fps: list[str] = []
 
     for fingerprint in failed_tests:
         existing = task_queue.find_active_by_fingerprint(fingerprint)
@@ -227,7 +237,17 @@ def run_inspection(
             skipped_fps.append(fingerprint)
             continue
 
-        # 沒有重複 → 組 spec → 入隊
+        # 去抖：檢查連續紅拍數
+        count = _DEBOUNCE_COUNTER.get(fingerprint, 0) + 1
+        _DEBOUNCE_COUNTER[fingerprint] = count
+
+        if count < DEBOUNCE_THRESHOLD:
+            # 還未達到 threshold，不產任務
+            debounced_fps.append(fingerprint)
+            continue
+
+        # 達到 threshold → 產任務，清除 counter
+        del _DEBOUNCE_COUNTER[fingerprint]
         spec = _build_task_spec(fingerprint)
         notes = {"source": "A", "fingerprint": fingerprint}
         task_id = task_queue.push(spec, notes=notes)
@@ -243,7 +263,9 @@ def run_inspection(
         "total_failed": len(failed_tests),
         "pushed": len(task_ids),
         "skipped_duplicate": len(skipped_fps),
+        "debounced": len(debounced_fps),
         "task_ids": task_ids,
         "fingerprints_pushed": pushed_fps,
         "fingerprints_skipped": skipped_fps,
+        "fingerprints_debounced": debounced_fps,
     }

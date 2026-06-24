@@ -15,6 +15,11 @@ _MODEL_PARAMS: dict[str, dict] = {
         "api_key": os.environ.get("OPENROUTER_API_KEY", ""),
         "free": True,
     },
+    "deepseek-v4-flash": {
+        "model": "openrouter/deepseek/deepseek-v4-flash",
+        "api_key": os.environ.get("OPENROUTER_API_KEY", ""),
+        "free": False,
+    },
     "openrouter-classifier": {
         "model": "openrouter/openai/gpt-oss-120b",
         "api_key": os.environ.get("OPENROUTER_API_KEY", ""),

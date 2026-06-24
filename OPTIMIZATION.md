@@ -12,15 +12,18 @@
 
 ---
 
-## 一、迴路總覽（與架構圖同風格的流程）
-（待填：ASCII 流程圖）
-跑任務 → 收 trace → 反思找錯 → 提修改 → 評測集驗證 → HITL 換版 → 進版控 → 再跑
+## 一、迴路總覽（已實作 2026-06-24）
 
-每個節點對應現有檔案：
-- trace 來源：`decision_log`（routing_events / request_trace）
-- 客觀驗收錨點：`checker.py`（pytest，效度的命脈）
+```
+跑任務 → record_eval() 收 metrics → reflect_recent() 反思
+→ build_proposal() 提修改 → HITL 審查 → 落地
+```
+
+對應元件：
+- eval/scenarios.json — 15 題評測場景（5 類各 3 題）
+- orchestrator/metrics.py — eval_results SQLite 表、CRUD、聚合查詢
+- orchestrator/reflect.py — rule-based 反思（低分觸發、重複 escalation）
 - 換版把關：Ryan（HITL，對應協作規則第 1、3 條）
-（待填：哪些節點是新元件、哪些復用現有，畫清楚不重造輪子。）
 
 ---
 
@@ -68,6 +71,47 @@
 ---
 
 ## 七、與路線圖的銜接
-（待填）
-- 階段一：評測集最小版（即「對照基準」指標的延伸）先立起來。
-- 階段二之後：每接一隻新手 / 新工具，評測集同步加題，確保「借力品質」可量。
+
+- 階段一（已完成）：評測集最小版（15 題）+ metrics 收集 + reflect 規則立起來
+- 階段二之後：每接一隻新手/新工具，評測集同步加題，確保「借力品質」可量
+
+---
+
+## 八、版本紀錄（每次優化圈落地記錄於此）
+
+### 2026-06-24 — Round 1：5 方向平行優化
+
+**觸發：** SCAMPER + 六頂思考帽系統性評估 → 篩選 5 條高影響/低成本方向
+
+**評測變動：** （跑 pytest 看即時數，Round 1/+15, Round 2/+25）
+
+**變更摘要：**
+
+| 方向 | 檔案 | 類型 | 說明 |
+|------|------|------|------|
+| ① 修復前查腦庫 | `repair.py` / `test_repair.py` | 新行為 | repair._build_prompt 在 call LLM 前先查 brain gene，首輪成功率↑，token 花費↓ |
+| ② CJK FTS5 分詞 | `knowledge.py` / `test_knowledge.py` | 搜尋升級 | jieba 分詞 + entries_fts_cjk FTS5 表，中文搜尋從 O(n) LIKE → O(1) FTS5 MATCH |
+| ③ Inspector 去抖 | `inspector.py` / `test_inspector.py` | 新行為 | 連續 2 拍紅才產任務，防 flaky test 浪費配額 |
+| ④ 心跳可變頻率 | `heartbeat.py` / `test_heartbeat.py` | 新行為 | queue_depth 決定 interval（忙碌 60s / 空閒 600s），節省閒置輪詢 |
+| ⑤ Auto-Consolidate 升級 | `auto_consolidate.py` / `test_auto_consolidate.py` | 新行為 | 相似 gene 合併偵測 + prune 機制 + 失敗計數器可觀測 |
+
+**紅線守護：** 未觸碰 checker.py / decision_log.py / safety.py / clarify.py。
+**測試結果：** 跑 pytest 看即時數 ✅
+**架構影響：** 無 — 所有變更皆在既有元件內擴充（non-invasive）。
+
+### 2026-06-24 — Round 2：Tier 2 — 三箭齊發
+
+**觸發：** Tier 2 優化方向（OPTIMIZATION.md 閉環 + Triage Auto-Suggest + 多語言 Checker）
+
+**評測變動：** 跑 pytest 看即時數
+
+**變更摘要：**
+
+| 方向 | 檔案 | 類型 | 說明 |
+|------|------|------|------|
+| A. OPTIMIZATION.md 閉環 | `eval/`、`metrics.py`、`reflect.py` | 新建 | 15 題評測集 + SQLite 指標收集 + rule-based 反思引擎 |
+| B. Triage Auto-Suggest | `triage.py`、`api/main.py` | 新建 | escalated 任務自動從腦庫搜尋修復建議，API 端點 |
+| C. 多語言 Checker | `checker.py` | 擴展 | 新增 JS/jest、Go test 語言檢測 + runner |
+
+**紅線守護：** 未觸碰 decision_log.py / safety.py / clarify.py。
+**測試結果：** 跑 pytest 看即時數

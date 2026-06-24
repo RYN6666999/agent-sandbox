@@ -28,6 +28,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+try:
+    import jieba
+    _HAS_JIEBA = True
+except ImportError:
+    _HAS_JIEBA = False
+
 _DB_LOCK = threading.Lock()
 
 # ── GBrain integration ──────────────────────────────────────────────────────────
@@ -214,6 +220,36 @@ CREATE TRIGGER IF NOT EXISTS entries_au AFTER UPDATE ON entries BEGIN
 END;
 """
 
+CJK_FTS5_SCHEMA = """
+CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts_cjk USING fts5(
+  content,
+  content=entries,
+  content_rowid='rowid'
+);
+"""
+
+
+def _has_cjk(text: str) -> bool:
+    """Check if string contains any CJK character."""
+    for ch in text:
+        if '\u4e00' <= ch <= '\u9fff':
+            return True
+    return False
+
+
+def _tokenize_cjk(text: str) -> str:
+    """If text contains CJK characters and jieba is available, tokenize.
+    Returns space-separated tokens for FTS5 indexing.
+    """
+    if not _HAS_JIEBA:
+        return text
+    # Check if contains CJK characters
+    for ch in text:
+        if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
+            tokens = jieba.lcut(text)
+            return ' '.join(tokens)
+    return text
+
 
 def _db_path() -> Path:
     override = os.environ.get("AGENTOS_KNOWLEDGE_DB_PATH", "").strip()
@@ -246,6 +282,11 @@ def ensure_schema() -> bool:
                     pass  # already exists
                 try:
                     conn.executescript(FTS5_TRIGGERS)
+                except sqlite3.OperationalError:
+                    pass  # already exists
+                # CJK FTS5 virtual table (best-effort, may be created already)
+                try:
+                    conn.executescript(CJK_FTS5_SCHEMA)
                 except sqlite3.OperationalError:
                     pass  # already exists
         return True
@@ -283,6 +324,18 @@ def write_knowledge(
                     """,
                     (entry_id, key, content, meta_json, now, now),
                 )
+                # 同步寫入 CJK FTS5 索引（使用 jieba 分詞，best-effort）
+                if _HAS_JIEBA:
+                    try:
+                        tokenized = _tokenize_cjk(content)
+                        if tokenized != content:
+                            rowid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                            conn.execute(
+                                "INSERT INTO entries_fts_cjk(rowid, content) VALUES (?, ?)",
+                                (rowid, tokenized),
+                            )
+                    except Exception:
+                        pass  # best-effort, never block write
         # GBrain dual-write: best-effort, non-blocking
         _gbrain_write(key, content, metadata=metadata)
         return entry_id
@@ -353,11 +406,25 @@ def search_knowledge(query: str, limit: int = 10) -> list[dict[str, Any]]:
                     ).fetchall()
                 except (sqlite3.OperationalError, sqlite3.DatabaseError):
                     rows = []
-                # ponytail: FTS5 unicode61 doesn't segment CJK — Chinese text
-                # tokenizes to one big token, so MATCH on a sub-term misses.
-                # Fall back to a LIKE substring scan (correct for any language,
-                # also covers FTS-unavailable). O(n) but fine at personal-brain
-                # scale — swap to a CJK-aware tokenizer if entries grow large.
+                # CJK FTS5 path: only when query contains CJK chars and jieba available
+                if not rows and _HAS_JIEBA and _has_cjk(query):
+                    try:
+                        tokenized_query = ' '.join(jieba.lcut(query))
+                        rows = conn.execute(
+                            """
+                            SELECT e.id, e.key, e.content, e.metadata, e.created_at, e.updated_at,
+                                   rank
+                            FROM entries_fts_cjk
+                            JOIN entries e ON e.rowid = entries_fts_cjk.rowid
+                            WHERE entries_fts_cjk MATCH ?
+                            ORDER BY rank
+                            LIMIT ?
+                            """,
+                            (tokenized_query, limit),
+                        ).fetchall()
+                    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+                        rows = []
+                # LIKE fallback: correct for any language, O(n) but fine at personal-brain scale
                 if not rows:
                     rows = conn.execute(
                         """

@@ -111,12 +111,55 @@ def gather_context(fingerprint: str, repo_root: Path) -> dict[str, Any] | None:
     if not sources:
         return None  # nothing editable to fix — bug is in the test itself
     _, tb = _run_pytest(fingerprint, repo_root)
-    return {"test_file": test_file, "test_code": test_code, "sources": sources, "traceback": tb}
+    return {"fingerprint": fingerprint, "test_file": test_file, "test_code": test_code, "sources": sources, "traceback": tb}
+
+
+def _extract_repair_keywords(fingerprint: str) -> str:
+    """Extract search keywords from a pytest fingerprint for knowledge base lookup.
+
+    Removes tests/ prefix, .py extension, test_ prefix (case-sensitive),
+    replaces :: with space, and splits remaining tokens on underscore.
+    """
+    kw = fingerprint
+    kw = re.sub(r"^tests/", "", kw)
+    kw = kw.replace(".py", "")
+    kw = kw.replace("::", " ")
+    tokens: list[str] = []
+    for part in kw.split():
+        t = re.sub(r"^test_", "", part)
+        tokens.extend(t.split("_"))
+    tokens = [t for t in tokens if t]
+    return " ".join(tokens)
+
+
+def _retrieve_brain_context(query: str, max_results: int = 3) -> str:
+    """Search knowledge base for related past experience.
+
+    Returns a formatted string to prepend to the prompt, or '' if nothing found.
+    Uses deferred import to avoid circular dependency with orchestrator.knowledge.
+    """
+    from orchestrator import knowledge
+
+    entries = knowledge.search_knowledge(query, limit=max_results)
+    if not entries:
+        return ""
+    lines = ["\nRelated past experience from knowledge base:"]
+    for e in entries:
+        key = e.get("key", "?")
+        content = (e.get("content", "") or "")[:200]
+        lines.append(f"- {key}: {content}")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _build_prompt(ctx: dict, extra_feedback: str = "") -> str:
-    parts = [f"Failing test: make `pytest {ctx['test_file'].name}` green.\n",
-             "TEST (do NOT change):\n```python\n" + ctx["test_code"] + "\n```\n"]
+    query = _extract_repair_keywords(ctx.get("fingerprint", ""))
+    brain = _retrieve_brain_context(query) if query else ""
+    parts = []
+    if brain:
+        parts.append(brain)
+    parts.append(f"Failing test: make `pytest {ctx['test_file'].name}` green.\n")
+    parts.append("TEST (do NOT change):\n```python\n" + ctx["test_code"] + "\n```\n")
     for src in ctx["sources"]:
         rel = src.relative_to(_repo_of(src))
         body = src.read_text(encoding="utf-8")[:MAX_FILE_BYTES]

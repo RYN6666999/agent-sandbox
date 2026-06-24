@@ -278,3 +278,71 @@ class TestInspectorTimeout:
 
         assert result["inspection"]["error"] is not None
         mock_loop.assert_called_once()
+
+
+# ── 可變頻率：_calculate_interval ────────────────────────────────────────────
+
+def test_calculate_interval_empty_queue():
+    from orchestrator.heartbeat import _calculate_interval
+    assert _calculate_interval(0) == 600
+
+
+def test_calculate_interval_busy_queue():
+    from orchestrator.heartbeat import _calculate_interval
+    assert _calculate_interval(5) == 60
+    assert _calculate_interval(3) == 60   # threshold boundary
+
+
+def test_calculate_interval_linear_interpolation():
+    from orchestrator.heartbeat import _calculate_interval
+    interval = _calculate_interval(1)
+    assert 60 < interval < 600
+    _calculate_interval(2)
+    assert 60 < interval < 600
+
+
+# ── 可變頻率：run_forever 整合 ──────────────────────────────────────────────
+
+def test_run_forever_uses_variable_interval():
+    """queue_depth 變化時，run_forever 應調整 interval。"""
+    from orchestrator.heartbeat import run_forever
+    from unittest.mock import patch
+
+    queue_depths = [0, 5, 0]  # 空 -> 忙碌 -> 空（供 _get_queue_depth 使用）
+    depth_iter = iter(queue_depths)
+
+    def mock_depth():
+        return next(depth_iter)
+
+    def mock_run_once(**kw):
+        # run_once 被完整 mock，不消耗 depth_iter
+        return {
+            "beat_n": kw.get("beat_n", 0),
+            "budget_exhausted_pre": False,
+            "spent_before": 0.0,
+            "inspection": {"pushed": 0},
+            "loop": {"processed": 0},
+            "budget_exhausted_post": False,
+            "queue_depth": 0,  # run_forever 的調整邏輯只看 _get_queue_depth() 回傳
+        }
+
+    sleep_times = []
+
+    def mock_sleep(seconds):
+        sleep_times.append(seconds)
+        if len(sleep_times) >= 3:  # 三次後跳出
+            raise KeyboardInterrupt()
+
+    with (
+        patch("orchestrator.heartbeat.run_once", side_effect=mock_run_once),
+        patch("orchestrator.heartbeat.time.sleep", side_effect=mock_sleep),
+        patch("orchestrator.heartbeat._get_queue_depth", side_effect=mock_depth),
+    ):
+        try:
+            run_forever(min_interval=60, max_interval=600)
+        except KeyboardInterrupt:
+            pass
+
+    assert len(sleep_times) >= 2
+    assert sleep_times[0] == 600  # 第一次空閒
+    assert sleep_times[1] == 60   # 第二次忙碌

@@ -64,3 +64,62 @@ def test_parse_proposal_strips_leaked_file_label():
 
 def test_parse_proposal_rejects_malformed():
     assert repair.parse_proposal("here is some prose, no code block")[0] is None
+
+
+# ── _extract_repair_keywords: fingerprint → space-joined keywords ──────────────
+
+def test_repair_keyword_extraction():
+    from orchestrator.repair import _extract_repair_keywords
+
+    assert _extract_repair_keywords("tests/test_foo.py::test_bar_baz") == "foo bar baz"
+    assert _extract_repair_keywords("tests/test_auth.py::TestLogin::test_timeout") == "auth TestLogin timeout"
+    assert _extract_repair_keywords("tests/test_simple.py::test_1") == "simple 1"
+
+
+# ── _build_prompt with brain context retrieval ─────────────────────────────────
+
+def test_repair_brain_retrieval_in_prompt(monkeypatch, tmp_path):
+    from orchestrator.repair import _build_prompt
+
+    fake_entries = [
+        {"key": "gene/debugging/off-by-one", "content": "上次修過 off-by-one error"},
+        {"key": "gene/debugging/login-timeout", "content": "登入逾時是 timeout 設太短"},
+    ]
+
+    def fake_search(query, limit=10):
+        return fake_entries
+
+    monkeypatch.setattr("orchestrator.knowledge.search_knowledge", fake_search)
+
+    ctx = {
+        "fingerprint": "tests/test_foo.py::test_x",
+        "test_file": tmp_path / "test_foo.py",
+        "test_code": "def test_x(): pass",
+        "sources": [],
+        "traceback": "AssertionError",
+    }
+    ctx["test_file"].write_text("")
+    result = _build_prompt(ctx)
+    assert "Related past experience" in result
+    assert "off-by-one" in result
+
+
+def test_repair_brain_empty_does_not_break(monkeypatch, tmp_path):
+    from orchestrator.repair import _build_prompt
+
+    def fake_search(query, limit=10):
+        return []
+
+    monkeypatch.setattr("orchestrator.knowledge.search_knowledge", fake_search)
+
+    ctx = {
+        "fingerprint": "tests/test_foo.py::test_x",
+        "test_file": tmp_path / "test_foo.py",
+        "test_code": "def test_x(): pass",
+        "sources": [],
+        "traceback": "AssertionError",
+    }
+    ctx["test_file"].write_text("")
+    result = _build_prompt(ctx)
+    assert "Related past experience" not in result
+    assert "Failing test" in result  # 正常內容不受影響

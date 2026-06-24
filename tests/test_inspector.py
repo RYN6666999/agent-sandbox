@@ -99,13 +99,17 @@ class TestInspectionWithFailures:
     """驗收點 2：pytest 有 N 個紅 → 產 N 個任務，source='A'、fingerprint 正確。"""
 
     def test_three_failures_produce_three_tasks(self, tmp_db):
-        from orchestrator.inspector import run_inspection
+        from orchestrator.inspector import run_inspection, _DEBOUNCE_COUNTER
 
         fps = [
             "tests/test_foo.py::test_alpha",
             "tests/test_bar.py::test_beta",
             "tests/test_baz.py::TestClass::test_gamma",
         ]
+        # 去抖 pre-seed：讓第一拍直接產任務
+        for fp in fps:
+            _DEBOUNCE_COUNTER[fp] = 1
+
         stdout = _make_pytest_stdout(fps)
 
         with patch("orchestrator.inspector._run_pytest",
@@ -119,10 +123,11 @@ class TestInspectionWithFailures:
         assert sorted(result["fingerprints_pushed"]) == sorted(fps)
 
     def test_tasks_have_source_A(self, tmp_db):
-        from orchestrator.inspector import run_inspection
+        from orchestrator.inspector import run_inspection, _DEBOUNCE_COUNTER
         from orchestrator import task_queue
 
         fp = "tests/test_foo.py::test_x"
+        _DEBOUNCE_COUNTER[fp] = 1
         stdout = _make_pytest_stdout([fp])
 
         with patch("orchestrator.inspector._run_pytest",
@@ -135,10 +140,11 @@ class TestInspectionWithFailures:
         assert task["notes"]["source"] == "A"
 
     def test_tasks_have_correct_fingerprint_in_notes(self, tmp_db):
-        from orchestrator.inspector import run_inspection
+        from orchestrator.inspector import run_inspection, _DEBOUNCE_COUNTER
         from orchestrator import task_queue
 
         fp = "tests/test_foo.py::test_check_something"
+        _DEBOUNCE_COUNTER[fp] = 1
         stdout = _make_pytest_stdout([fp])
 
         with patch("orchestrator.inspector._run_pytest",
@@ -155,10 +161,11 @@ class TestDeduplication:
 
     def test_second_inspection_skips_existing_pending(self, tmp_db):
         """連跑兩次 run_inspection → 第二次跳過，佇列只有 1 個 pending 任務。"""
-        from orchestrator.inspector import run_inspection
+        from orchestrator.inspector import run_inspection, _DEBOUNCE_COUNTER
         from orchestrator import task_queue
 
         fp = "tests/test_foo.py::test_repeat"
+        _DEBOUNCE_COUNTER[fp] = 1
         stdout = _make_pytest_stdout([fp])
         mock_result = _mock_run_pytest(stdout, exit_code=1)
 
@@ -179,10 +186,11 @@ class TestDeduplication:
 
     def test_skips_when_running_task_exists(self, tmp_db):
         """已有 running 任務 → 巡檢時跳過不產。"""
-        from orchestrator.inspector import run_inspection
+        from orchestrator.inspector import run_inspection, _DEBOUNCE_COUNTER
         from orchestrator import task_queue
 
         fp = "tests/test_foo.py::test_in_progress"
+        _DEBOUNCE_COUNTER[fp] = 1
         stdout = _make_pytest_stdout([fp])
 
         # 先產一個任務，再把它改成 running
@@ -204,10 +212,11 @@ class TestDeduplication:
 
     def test_skips_when_escalated_task_exists(self, tmp_db):
         """已有 escalated 任務 → 跳過（由人手動重試，機器不自動重試）。"""
-        from orchestrator.inspector import run_inspection
+        from orchestrator.inspector import run_inspection, _DEBOUNCE_COUNTER
         from orchestrator import task_queue
 
         fp = "tests/test_foo.py::test_hard_to_fix"
+        _DEBOUNCE_COUNTER[fp] = 1
         stdout = _make_pytest_stdout([fp])
 
         with patch("orchestrator.inspector._run_pytest",
@@ -230,10 +239,11 @@ class TestDeadNotInDedup:
 
     def test_dead_task_allows_new_push(self, tmp_db):
         """fingerprint 曾 dead，下次巡檢時允許重新產（不被去重跳過）。"""
-        from orchestrator.inspector import run_inspection
+        from orchestrator.inspector import run_inspection, _DEBOUNCE_COUNTER
         from orchestrator import task_queue
 
         fp = "tests/test_env.py::test_network_dependent"
+        _DEBOUNCE_COUNTER[fp] = 1
         stdout = _make_pytest_stdout([fp])
 
         # 第一次巡檢 → 產任務
@@ -248,6 +258,8 @@ class TestDeadNotInDedup:
         task_queue.update_status(task_id, "dead", score=0.0, feedback="env error")
 
         # 第二次巡檢：dead 不在去重範圍 → 應該重新產任務
+        # 注意：第一次產完後 counter 已清除，需重新 pre-seed
+        _DEBOUNCE_COUNTER[fp] = 1
         with patch("orchestrator.inspector._run_pytest",
                    return_value=_mock_run_pytest(stdout, exit_code=1)):
             result2 = run_inspection()
@@ -264,10 +276,11 @@ class TestValidTaskSpec:
     """驗收點 5：產的任務是合法 TaskSpec。"""
 
     def test_pushed_task_has_valid_spec(self, tmp_db):
-        from orchestrator.inspector import run_inspection
+        from orchestrator.inspector import run_inspection, _DEBOUNCE_COUNTER
         from orchestrator import task_queue
 
         fp = "tests/test_spec.py::test_validate_me"
+        _DEBOUNCE_COUNTER[fp] = 1
         stdout = _make_pytest_stdout([fp])
 
         with patch("orchestrator.inspector._run_pytest",
@@ -290,10 +303,11 @@ class TestValidTaskSpec:
 
     def test_spec_boundaries_include_no_unrelated_files(self, tmp_db):
         """boundaries 含「不可修改與此測試無關的其他檔案」（Ryan 微調）。"""
-        from orchestrator.inspector import run_inspection
+        from orchestrator.inspector import run_inspection, _DEBOUNCE_COUNTER
         from orchestrator import task_queue
 
         fp = "tests/test_spec.py::test_boundary_check"
+        _DEBOUNCE_COUNTER[fp] = 1
         stdout = _make_pytest_stdout([fp])
 
         with patch("orchestrator.inspector._run_pytest",
@@ -350,6 +364,68 @@ class TestPytestTimeout:
         assert result is not None
 
 
+class TestDebounce:
+    """去抖：連續 N 拍都紅才產任務，防 flaky test 浪費配額。"""
+
+    def test_debounce_first_hit_does_not_push(self, tmp_db):
+        from orchestrator.inspector import run_inspection, _DEBOUNCE_COUNTER
+        _DEBOUNCE_COUNTER.clear()
+
+        fp = "tests/test_flaky.py::test_flaky_one"
+        stdout = _make_pytest_stdout([fp])
+
+        with patch("orchestrator.inspector._run_pytest",
+                   return_value=_mock_run_pytest(stdout, exit_code=1)):
+            result = run_inspection()
+
+        assert result["pushed"] == 0
+        assert result["debounced"] == 1
+        assert fp in result["fingerprints_debounced"]
+
+    def test_debounce_second_hit_pushes(self, tmp_db):
+        from orchestrator.inspector import run_inspection, _DEBOUNCE_COUNTER
+        _DEBOUNCE_COUNTER.clear()
+
+        fp = "tests/test_flaky.py::test_flaky_two"
+        stdout = _make_pytest_stdout([fp])
+        mock_result = _mock_run_pytest(stdout, exit_code=1)
+
+        with patch("orchestrator.inspector._run_pytest", return_value=mock_result):
+            result1 = run_inspection()
+        assert result1["pushed"] == 0  # 第一拍還不能產
+
+        with patch("orchestrator.inspector._run_pytest", return_value=mock_result):
+            result2 = run_inspection()  # 第二拍：threshold=2，達標
+        assert result2["pushed"] == 1
+        assert result2["debounced"] == 0
+
+    def test_debounce_resets_on_green(self, tmp_db):
+        from orchestrator.inspector import run_inspection, _DEBOUNCE_COUNTER
+        _DEBOUNCE_COUNTER.clear()
+
+        fp = "tests/test_flaky.py::test_flaky_three"
+        red_stdout = _make_pytest_stdout([fp])
+        green_stdout = _all_green_stdout()
+        mock_red = _mock_run_pytest(red_stdout, exit_code=1)
+        mock_green = _mock_run_pytest(green_stdout, exit_code=0)
+
+        # 第一拍：紅
+        with patch("orchestrator.inspector._run_pytest", return_value=mock_red):
+            run_inspection()
+        assert _DEBOUNCE_COUNTER.get(fp) == 1
+
+        # 第二拍：綠（測試修好了）
+        with patch("orchestrator.inspector._run_pytest", return_value=mock_green):
+            run_inspection()
+        assert fp not in _DEBOUNCE_COUNTER  # counter 被清零
+
+        # 第三拍：又紅（新的失敗）
+        with patch("orchestrator.inspector._run_pytest", return_value=mock_red):
+            result = run_inspection()
+        assert result["pushed"] == 0       # counter reset 後重新計算
+        assert result["debounced"] == 1
+
+
 # ── REAL pytest 整合測試（堵住合成格式盲區）───────────────────────────────────
 #
 # 上面所有測試都餵「合成的」pytest 輸出 → 曾經把一個真 bug 遮了很久：
@@ -371,6 +447,11 @@ def test_run_inspection_detects_real_pytest_failure(tmp_db, tmp_path):
         encoding="utf-8",
     )
 
+    # 去抖 pre-seed：先跑一次建立 counter
+    r1 = inspector.run_inspection(tests_dir=str(tests_dir))
+    assert r1["debounced"] == 1, "first run should debounce"
+
+    # 第二拍：達 threshold，產任務
     result = inspector.run_inspection(tests_dir=str(tests_dir))
 
     assert result["total_failed"] == 1, f"real failure not detected: {result}"

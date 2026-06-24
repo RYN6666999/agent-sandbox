@@ -203,3 +203,170 @@ class TestLlmFallbackMarker:
 
         assert result.source == "claude-cli"
         assert result.pytest_result is None
+
+
+# ── Language detection tests ─────────────────────────────────────────────────
+
+
+class TestLanguageDetection:
+    def test_detect_javascript_from_fence(self):
+        from orchestrator.checker import _detect_language
+        assert _detect_language("```javascript\nconst x = 1;\n```") == "javascript"
+        assert _detect_language("```js\nconst x = 1;\n```") == "javascript"
+
+    def test_detect_go_from_fence(self):
+        from orchestrator.checker import _detect_language
+        assert _detect_language("```go\npackage main\n```") == "go"
+
+    def test_detect_go_from_signature(self):
+        from orchestrator.checker import _detect_language
+        assert _detect_language("package main\n\nfunc main() {}") == "go"
+
+    def test_detect_javascript_from_signature(self):
+        from orchestrator.checker import _detect_language
+        assert _detect_language("function add(a, b) { return a + b; }") == "javascript"
+        assert _detect_language("const x = require('fs');") == "javascript"
+
+    def test_detect_typescript(self):
+        from orchestrator.checker import _detect_language
+        assert _detect_language("interface User { name: string; }") == "typescript"
+
+    def test_detect_python_default(self):
+        from orchestrator.checker import _detect_language
+        assert _detect_language("def add(a, b):\n    return a + b") == "python"
+
+    def test_detect_unknown(self):
+        from orchestrator.checker import _detect_language
+        assert _detect_language("純文字內容 not code") == "unknown"
+
+
+# ── JS/Go check tests (mocked) ───────────────────────────────────────────────
+
+
+class TestJestCheck:
+    def test_jest_check_passes(self):
+        from orchestrator.checker import _jest_check
+        from unittest.mock import patch
+
+        with patch("orchestrator.checker.run_jest") as mock_run:
+            from orchestrator.checker import PytestResult
+            mock_run.return_value = PytestResult(
+                passed=True, exit_code=0, passed_count=3, failed_count=0,
+                stdout="Tests: 3 passed, 3 total", timed_out=False,
+            )
+            result = _jest_check("test('add', () => { expect(1+1).toBe(2); })")
+
+        assert result.passed is True
+        assert result.score == 10.0
+        assert result.source == "pytest"
+
+    def test_jest_check_fails(self):
+        from orchestrator.checker import _jest_check
+        from unittest.mock import patch
+
+        with patch("orchestrator.checker.run_jest") as mock_run:
+            from orchestrator.checker import PytestResult
+            mock_run.return_value = PytestResult(
+                passed=False, exit_code=1, passed_count=2, failed_count=1,
+                stdout="Tests: 2 passed, 1 failed", timed_out=False,
+            )
+            result = _jest_check("test('failing', () => { expect(1).toBe(2); })")
+
+        assert result.passed is False
+        assert result.score == 2.0
+
+    def test_jest_check_timeout(self):
+        from orchestrator.checker import _jest_check
+        from unittest.mock import patch
+
+        with patch("orchestrator.checker.run_jest") as mock_run:
+            from orchestrator.checker import PytestResult
+            mock_run.return_value = PytestResult(
+                passed=False, exit_code=-1, passed_count=0, failed_count=0,
+                stdout="[jest timed out]", timed_out=True,
+            )
+            result = _jest_check("slow test")
+
+        assert result.score == 0.0
+        assert "timed out" in result.feedback
+
+
+class TestGoCheck:
+    def test_go_check_passes(self):
+        from orchestrator.checker import _go_check
+        from unittest.mock import patch
+
+        with patch("orchestrator.checker.run_go_test") as mock_run:
+            from orchestrator.checker import PytestResult
+            mock_run.return_value = PytestResult(
+                passed=True, exit_code=0, passed_count=1, failed_count=0,
+                stdout="ok  testcheck", timed_out=False,
+            )
+            result = _go_check("func TestAdd(t *testing.T) { ... }")
+
+        assert result.passed is True
+        assert result.score == 10.0
+        assert result.source == "pytest"
+
+    def test_go_check_fails(self):
+        from orchestrator.checker import _go_check
+        from unittest.mock import patch
+
+        with patch("orchestrator.checker.run_go_test") as mock_run:
+            from orchestrator.checker import PytestResult
+            mock_run.return_value = PytestResult(
+                passed=False, exit_code=1, passed_count=0, failed_count=1,
+                stdout="FAIL  testcheck", timed_out=False,
+            )
+            result = _go_check("func TestBroken(t *testing.T) { t.Fail() }")
+
+        assert result.passed is False
+        assert result.score == 2.0
+
+
+# ── Integration: check() dispatches correctly ────────────────────────────────
+
+
+class TestCheckDispatch:
+    def test_python_still_works(self, monkeypatch):
+        """Python code should still go through pytest path."""
+        from orchestrator.checker import check
+        from contracts.task_spec import TaskSpec
+        spec = TaskSpec(why="add", io_example={"input": "1,2", "expected_output": "3"},
+                        taste=[], boundaries=[], stop_on_metric="quality", max_rounds=1)
+
+        output = "```python\ndef add(a, b): return a + b\n\ndef test_add():\n    assert add(1,2) == 3\n```"
+
+        # Don't mock — just verify it dispatches without error and checks type
+        # We mock run_pytest to avoid actual subprocess
+        from unittest.mock import patch
+        from orchestrator.checker import PytestResult
+        with patch("orchestrator.checker.run_pytest") as mock_rp:
+            mock_rp.return_value = PytestResult(passed=True, exit_code=0,
+                                                passed_count=1, failed_count=0,
+                                                stdout="1 passed", timed_out=False)
+            result = check(spec, output)
+
+        assert result.source == "pytest"
+        mock_rp.assert_called_once()
+
+    def test_javascript_dispatches_to_jest(self, monkeypatch):
+        """JS code with test patterns should go through jest path."""
+        from orchestrator.checker import check
+        from contracts.task_spec import TaskSpec
+        spec = TaskSpec(why="js test", io_example={"input": "", "expected_output": "pass"},
+                        taste=[], boundaries=[], stop_on_metric="quality", max_rounds=1)
+
+        output = "```javascript\nfunction add(a, b) { return a + b; }\n\ntest('add', () => { expect(add(1,2)).toBe(3); })\n```"
+
+        from unittest.mock import patch
+        from orchestrator.checker import PytestResult
+        with patch("orchestrator.checker.run_jest") as mock_jest:
+            mock_jest.return_value = PytestResult(passed=True, exit_code=0,
+                                                  passed_count=1, failed_count=0,
+                                                  stdout="Tests: 1 passed", timed_out=False)
+            result = check(spec, output)
+
+        # Should not reach the python test check
+        assert result.passed is True
+        mock_jest.assert_called_once()

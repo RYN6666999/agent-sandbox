@@ -7,7 +7,6 @@
     "agnes"
   ],
   "routing_confidence_threshold": 0.8,
-  "auto_consolidate": true,
   "max_rounds": 5,
   "temperature": 0.7,
   "max_tokens": 2048,
@@ -17,5 +16,345 @@
     "gemini": "",
     "agnes": "",
     "openrouter": ""
+  },
+  "executors": {
+    "skill-aionui-approve-runner-sop-runner": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/aionui-approve-runner-sop/scripts/runner.py"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Connect a cloud/remote AI assistant to a Mac for interactive debugging via an \"approve-runner\" + Cloudflare Quick Tunnel. Use when you want the assistant to submit shell commands remotely, but require — runner",
+      "name": "skill-aionui-approve-runner-sop-runner"
+    },
+    "skill-aionui-approve-runner-sop-sop_cleanup": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/aionui-approve-runner-sop/scripts/sop_cleanup.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Connect a cloud/remote AI assistant to a Mac for interactive debugging via an \"approve-runner\" + Cloudflare Quick Tunnel. Use when you want the assistant to submit shell commands remotely, but require — sop_cleanup",
+      "name": "skill-aionui-approve-runner-sop-sop_cleanup"
+    },
+    "skill-aionui-approve-runner-sop-sop_healthcheck": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/aionui-approve-runner-sop/scripts/sop_healthcheck.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Connect a cloud/remote AI assistant to a Mac for interactive debugging via an \"approve-runner\" + Cloudflare Quick Tunnel. Use when you want the assistant to submit shell commands remotely, but require — sop_healthcheck",
+      "name": "skill-aionui-approve-runner-sop-sop_healthcheck"
+    },
+    "skill-aionui-approve-runner-sop-sop_start_runner": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/aionui-approve-runner-sop/scripts/sop_start_runner.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Connect a cloud/remote AI assistant to a Mac for interactive debugging via an \"approve-runner\" + Cloudflare Quick Tunnel. Use when you want the assistant to submit shell commands remotely, but require — sop_start_runner",
+      "name": "skill-aionui-approve-runner-sop-sop_start_runner"
+    },
+    "skill-aionui-approve-runner-sop-sop_start_tunnel": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/aionui-approve-runner-sop/scripts/sop_start_tunnel.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Connect a cloud/remote AI assistant to a Mac for interactive debugging via an \"approve-runner\" + Cloudflare Quick Tunnel. Use when you want the assistant to submit shell commands remotely, but require — sop_start_tunnel",
+      "name": "skill-aionui-approve-runner-sop-sop_start_tunnel"
+    },
+    "skill-continuous-learning-evaluate-session": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/continuous-learning/evaluate-session.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Automatically extract reusable patterns from Claude Code sessions and save them as learned skills for future use. — evaluate-session",
+      "name": "skill-continuous-learning-evaluate-session"
+    },
+    "skill-continuous-learning-v2-detect-project": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/continuous-learning-v2/scripts/detect-project.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Instinct-based learning system that observes sessions via hooks, creates atomic instincts with confidence scoring, and evolves them into skills/commands/agents. v2.1 adds project-scoped instincts to p — detect-project",
+      "name": "skill-continuous-learning-v2-detect-project"
+    },
+    "skill-continuous-learning-v2-instinct-cli": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/continuous-learning-v2/scripts/instinct-cli.py"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Instinct-based learning system that observes sessions via hooks, creates atomic instincts with confidence scoring, and evolves them into skills/commands/agents. v2.1 adds project-scoped instincts to p — instinct-cli",
+      "name": "skill-continuous-learning-v2-instinct-cli"
+    },
+    "skill-continuous-learning-v2-test_parse_instinct": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/continuous-learning-v2/scripts/test_parse_instinct.py"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Instinct-based learning system that observes sessions via hooks, creates atomic instincts with confidence scoring, and evolves them into skills/commands/agents. v2.1 adds project-scoped instincts to p — test_parse_instinct",
+      "name": "skill-continuous-learning-v2-test_parse_instinct"
+    },
+    "skill-erickson-coaching-skill_log": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/erickson-coaching/scripts/skill_log.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "| — skill_log",
+      "name": "skill-erickson-coaching-skill_log"
+    },
+    "skill-full-bypass-permissions-auto-approve-protected": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/full-bypass-permissions/scripts/auto-approve-protected.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "> — auto-approve-protected",
+      "name": "skill-full-bypass-permissions-auto-approve-protected"
+    },
+    "skill-military-grade-workflow-guard-check": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/military-grade-workflow/scripts/guard-check.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "軍工級 Vibe Coding — 強制 spec→contract→guard 開發流程 — guard-check",
+      "name": "skill-military-grade-workflow-guard-check"
+    },
+    "skill-military-grade-workflow-new-spec": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/military-grade-workflow/scripts/new-spec.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "軍工級 Vibe Coding — 強制 spec→contract→guard 開發流程 — new-spec",
+      "name": "skill-military-grade-workflow-new-spec"
+    },
+    "skill-notebooklm-auth_manager": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/notebooklm/scripts/run.py",
+        "auth_manager.py"
+      ],
+      "prompt_flag": null,
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Use this skill to query your Google NotebookLM notebooks directly from Claude Code for source-grounded, citation-backed answers from Gemini. Browser automation, library management, persistent auth. Dr — auth_manager",
+      "name": "skill-notebooklm-auth_manager"
+    },
+    "skill-notebooklm-notebook_manager": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/notebooklm/scripts/run.py",
+        "notebook_manager.py"
+      ],
+      "prompt_flag": null,
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Use this skill to query your Google NotebookLM notebooks directly from Claude Code for source-grounded, citation-backed answers from Gemini. Browser automation, library management, persistent auth. Dr — notebook_manager",
+      "name": "skill-notebooklm-notebook_manager"
+    },
+    "skill-notebooklm-cleanup_manager": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/notebooklm/scripts/run.py",
+        "cleanup_manager.py"
+      ],
+      "prompt_flag": null,
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Use this skill to query your Google NotebookLM notebooks directly from Claude Code for source-grounded, citation-backed answers from Gemini. Browser automation, library management, persistent auth. Dr — cleanup_manager",
+      "name": "skill-notebooklm-cleanup_manager"
+    },
+    "skill-notebooklm-ask_question": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/notebooklm/scripts/run.py",
+        "ask_question.py"
+      ],
+      "prompt_flag": "--question",
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Use this skill to query your Google NotebookLM notebooks directly from Claude Code for source-grounded, citation-backed answers from Gemini. Browser automation, library management, persistent auth. Dr — ask_question",
+      "name": "skill-notebooklm-ask_question"
+    },
+    "skill-openclaw-persona-forge-gacha": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/openclaw-persona-forge/gacha.py"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "|- — gacha",
+      "name": "skill-openclaw-persona-forge-gacha"
+    },
+    "skill-planning-with-files-check-complete": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/planning-with-files/scripts/check-complete.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Implements Manus-style file-based planning for complex tasks. Creates task_plan.md, findings.md, and progress.md. Use when starting complex multi-step tasks, research projects, or any task requiring > — check-complete",
+      "name": "skill-planning-with-files-check-complete"
+    },
+    "skill-planning-with-files-init-session": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/planning-with-files/scripts/init-session.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Implements Manus-style file-based planning for complex tasks. Creates task_plan.md, findings.md, and progress.md. Use when starting complex multi-step tasks, research projects, or any task requiring > — init-session",
+      "name": "skill-planning-with-files-init-session"
+    },
+    "skill-planning-with-files-session-catchup": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/planning-with-files/scripts/session-catchup.py"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Implements Manus-style file-based planning for complex tasks. Creates task_plan.md, findings.md, and progress.md. Use when starting complex multi-step tasks, research projects, or any task requiring > — session-catchup",
+      "name": "skill-planning-with-files-session-catchup"
+    },
+    "skill-rules-distill-scan-rules": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/rules-distill/scripts/scan-rules.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Scan skills to extract cross-cutting principles and distill them into rules — append, revise, or create new rule files — scan-rules",
+      "name": "skill-rules-distill-scan-rules"
+    },
+    "skill-rules-distill-scan-skills": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/rules-distill/scripts/scan-skills.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Scan skills to extract cross-cutting principles and distill them into rules — append, revise, or create new rule files — scan-skills",
+      "name": "skill-rules-distill-scan-skills"
+    },
+    "skill-skill-comply": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/skill-comply/scripts/run.py"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Visualize whether skills, rules, and agent definitions are actually followed — auto-generates scenarios at 3 prompt strictness levels, runs agents, classifies behavioral sequences, and reports complia",
+      "name": "skill-skill-comply"
+    },
+    "skill-skill-stocktake-quick-diff": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/skill-stocktake/scripts/quick-diff.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Use when auditing Claude skills and commands for quality. Supports Quick Scan (changed skills only) and Full Stocktake modes with sequential subagent batch evaluation. — quick-diff",
+      "name": "skill-skill-stocktake-quick-diff"
+    },
+    "skill-skill-stocktake-save-results": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/skill-stocktake/scripts/save-results.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Use when auditing Claude skills and commands for quality. Supports Quick Scan (changed skills only) and Full Stocktake modes with sequential subagent batch evaluation. — save-results",
+      "name": "skill-skill-stocktake-save-results"
+    },
+    "skill-skill-stocktake-scan": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/skill-stocktake/scripts/scan.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Use when auditing Claude skills and commands for quality. Supports Quick Scan (changed skills only) and Full Stocktake modes with sequential subagent batch evaluation. — scan",
+      "name": "skill-skill-stocktake-scan"
+    },
+    "skill-skillshare-run": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/skillshare/scripts/run.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "| — run",
+      "name": "skill-skillshare-run"
+    },
+    "skill-strategic-compact-suggest-compact": {
+      "binary": "bash",
+      "flags": [
+        "/Users/ryan/.claude/skills/strategic-compact/suggest-compact.sh"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Suggests manual context compaction at logical intervals to preserve context through task phases rather than arbitrary auto-compaction. — suggest-compact",
+      "name": "skill-strategic-compact-suggest-compact"
+    },
+    "skill-ui-ux-pro-max-core": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/ui-ux-pro-max/scripts/core.py"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Comprehensive design guide for web and mobile applications. Use when designing new UI components or pages, choosing color palettes and typography, or reviewing code for UX issues. — core",
+      "name": "skill-ui-ux-pro-max-core"
+    },
+    "skill-ui-ux-pro-max-design_system": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/ui-ux-pro-max/scripts/design_system.py"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Comprehensive design guide for web and mobile applications. Use when designing new UI components or pages, choosing color palettes and typography, or reviewing code for UX issues. — design_system",
+      "name": "skill-ui-ux-pro-max-design_system"
+    },
+    "skill-ui-ux-pro-max-search": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/ui-ux-pro-max/scripts/search.py"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "Comprehensive design guide for web and mobile applications. Use when designing new UI components or pages, choosing color palettes and typography, or reviewing code for UX issues. — search",
+      "name": "skill-ui-ux-pro-max-search"
+    },
+    "skill-videodb-ws_listener": {
+      "binary": "python",
+      "flags": [
+        "/Users/ryan/.claude/skills/videodb/scripts/ws_listener.py"
+      ],
+      "type": "subprocess",
+      "timeout": 120,
+      "description": "See, Understand, Act on video and audio. See- ingest from local files, URLs, RTSP/live feeds, or live record desktop; return realtime context and playable stream links. Understand- extract frames, bui — ws_listener",
+      "name": "skill-videodb-ws_listener"
+    }
   }
 }

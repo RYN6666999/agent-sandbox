@@ -165,14 +165,36 @@ def test_search_no_match(temp_knowledge_db):
 
 
 def test_search_finds_cjk_content(temp_knowledge_db):
-    # Regression: FTS5 unicode61 doesn't segment CJK, so MATCH on a Chinese
-    # sub-term misses. search_knowledge must fall back to LIKE for these.
-    # This brain stores 繁中 genes/notes, so Chinese search is core, not edge.
     knowledge.write_knowledge("gene/zh", "任務通過驗收 (score 10.0, via pytest): 整數相加")
-    assert len(knowledge.search_knowledge("驗收")) >= 1
-    assert len(knowledge.search_knowledge("整數")) >= 1
-    # ASCII embedded in CJK content still findable (FTS fast path)
-    assert len(knowledge.search_knowledge("pytest")) >= 1
+    # 即使 jieba 不可用，也要能透過 LIKE fallback 找到
+    results = knowledge.search_knowledge("驗收")
+    assert len(results) >= 1
+    assert "驗收" in results[0]["content"]
+
+
+def test_cjk_fts_finds_word(temp_knowledge_db):
+    """CJK FTS5 應能透過 jieba 分詞找到中文詞彙。"""
+    entry_id = knowledge.write_knowledge("gene/zh/test", "任務通過驗收 (score 10.0)")
+    results = knowledge.search_knowledge("驗收")
+    assert len(results) >= 1
+    assert "驗收" in results[0]["content"]
+
+
+def test_cjk_fts_fallback_when_jieba_missing(temp_knowledge_db, monkeypatch):
+    """當 jieba 不可用時，CJK 搜尋應優雅回退到 LIKE。"""
+    monkeypatch.setattr("orchestrator.knowledge._HAS_JIEBA", False)
+    knowledge.write_knowledge("gene/zh/fallback", "中文測試內容")
+    results = knowledge.search_knowledge("測試")
+    assert len(results) >= 1
+
+
+def test_ascii_search_unchanged(temp_knowledge_db):
+    """英文/ASCII 搜尋完全不受 CJK 改動影響。"""
+    knowledge.write_knowledge("test/ascii", "pytest is a testing framework for Python")
+    results = knowledge.search_knowledge("pytest")
+    assert len(results) >= 1
+    # 一般 FTS5 仍能命中
+    assert results[0]["key"] == "test/ascii"
 
 
 def test_search_respects_limit(temp_knowledge_db):

@@ -828,6 +828,12 @@ class QueueTaskSummary(BaseModel):
     created_at: str
 
 
+class TriageSuggestResponse(BaseModel):
+    task_id: str
+    query: str = ""
+    suggestions: list[dict] = []
+
+
 @app.post("/queue/push")
 def queue_push(req: QueuePushRequest):
     """手動把任務放入佇列。source 只接受 'A' 或 'B'，未傳預設 'B'。"""
@@ -905,6 +911,24 @@ def queue_get_task(task_id: str):
     if task is None:
         raise HTTPException(404, f"task '{task_id}' not found")
     return task
+
+
+@app.get("/queue/triage/suggest/{task_id}")
+def triage_suggest(task_id: str):
+    """Auto-suggest fix for an escalated task from knowledge base."""
+    from orchestrator import task_queue
+    from orchestrator.triage import suggest_fix as _suggest
+
+    task = task_queue.get_task(task_id)
+    if task is None:
+        raise HTTPException(404, f"task '{task_id}' not found")
+    if task["status"] != "escalated":
+        raise HTTPException(422, "task is not escalated, current status: " + task["status"])
+
+    suggestion = _suggest(task)
+    if suggestion is None:
+        return {"task_id": task_id, "query": "", "suggestions": []}
+    return suggestion
 
 
 # ── Agnes multimodal ──────────────────────────────────────────────────────

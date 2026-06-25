@@ -140,6 +140,18 @@ Backlog: clarify_routing UI / headless / 沙箱 / Model Router
 核心循環 + 自修復 + 自我成長 + 記憶四維皆已閉環。
 目前狀態：（跑 pytest 看即時數）
 
+### 本輪完整成果（2026-06-24 ~ 06-25）
+
+**Core Goal 系統** ✅
+- core-goal.md 永久目標定義 + CreateGoal durable + Cron 0 8 * * *
+- 行為協議：完成後自動分析下一步，不等指令
+
+**記憶四維全修** ✅
+- 調用：Maker/Reflect 接入腦庫；Repair 查 brain 命中→record_access
+- 成長：Dedup 206→30→20 條；內容增強（✅/❌ + domain 偵測）
+- 連結：related_ids schema + update_knowledge + link_entries
+- 迭代：age+confidence prune；confidence 動態分級；heartbeat 定期 prune+eval
+
 自主運作已設定：
 - `core-goal.md` — 永久核心目標（高於本文件）
 - `CreateGoal` 已註冊 — durable goal 跨 session 持續

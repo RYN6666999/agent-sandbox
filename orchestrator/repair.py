@@ -160,6 +160,11 @@ def _retrieve_brain_context(query: str, max_results: int = 3) -> str:
         key = e.get("key", "?")
         content = (e.get("content", "") or "")[:200]
         lines.append(f"- {key}: {content}")
+        # Track access and link: when repair hits a brain entry, record it
+        try:
+            knowledge.record_access(e.get("id", ""))
+        except Exception:
+            pass
     lines.append("")
     return "\n".join(lines)
 

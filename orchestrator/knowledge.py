@@ -689,4 +689,13 @@ def consolidate_experiences(
 
         entry_id = write_knowledge(gene_key, content, metadata=metadata)
         results.append({"key": gene_key, "entry_id": entry_id})
+
+        # Auto-link: find existing entries with same domain and link
+        try:
+            existing = search_knowledge(f"gene/{domain}/", limit=5)
+            for ex in existing:
+                if ex.get("id") and ex["id"] != entry_id:
+                    link_entries(entry_id, ex["id"])
+        except Exception:
+            pass
     return results

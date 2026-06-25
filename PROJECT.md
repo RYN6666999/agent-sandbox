@@ -179,6 +179,17 @@ Postgres、Redis、Docker、雲端服務（資料隱私 + 降複雜度）。
 - `scripts/login-genspark.sh` — GenSpark 登入 helper
 - `tests/test_knowledge.py` — 腦庫 22 項測試（CRUD + FTS + metadata round-trip + slashes-in-key）
 
+### 新增閉環模組
+- `orchestrator/metrics.py` — 指標收集（eval_results SQLite 表，record_eval/get_metrics）
+- `orchestrator/reflect.py` — 反思引擎：metrics + brain → rule-based 改進提案
+- `orchestrator/triage.py` — escalated 任務自動搜 brain 給修復建議
+- `eval/scenarios.json` — 15 題評測場景（5 類各 3 題）
+- `scripts/run_eval.py` — eval scenarios 跑路由管線打分（heartbeat 定期觸發）
+- `.scream-code/core-goal.md` — 永久核心目標（自主運作最高指導原則）
+- `orchestrator/agnes.py` — Agnes 多模態核心（analyze_image / generate_image / generate_video）
+- `orchestrator/skill_bridge.py` — Skill Bridge 掃描器（自動掛載 Claude skill → executor）
+- `orchestrator/search.py` — DuckDuckGo HTML 搜尋（純 stdlib，無外部依賴）
+
 ---
 
 ## 四、停止條件 (Loop 收斂判定)

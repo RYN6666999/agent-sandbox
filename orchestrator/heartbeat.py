@@ -179,6 +179,19 @@ def run_once(
         except Exception:
             pass
 
+    # ── 定期執行 eval scenarios（機率觸發，~每 50 拍一次，不花 LLM 預算） ───
+    if _random.random() < 0.02:
+        try:
+            from scripts.run_eval import run_all as _run_eval
+            eval_result = _run_eval()
+            logger.info("%s eval: %d/%d passed (%d/%d free via safety+clarify)",
+                        BEAT_LOG_PREFIX, eval_result["passed"], eval_result["total"],
+                        eval_result["by_category"].get("sensitive", {}).get("passed", 0)
+                        + eval_result["by_category"].get("danger", {}).get("passed", 0),
+                        eval_result["total"])
+        except Exception:
+            pass
+
     return {
         "beat_n": beat_n,
         "budget_exhausted_pre": False,

@@ -142,6 +142,10 @@ orchestrator/
   search.py                 # DuckDuckGo HTML 解析器（純 stdlib）
   agnes.py                  # Agnes 多模態 API 接入
   skill_bridge.py           # 自動掛載 .claude/skills/ 為 executor
+  metrics.py                # 指標收集（eval_results SQLite + 聚合查詢）
+  reflect.py                # 反思引擎：rule-based 改進提案
+  triage.py                 # escalated 任務自動搜 brain 給修復建議
+  repair.py                 # 真實自修復：改 repo source + 全回歸守
   task_queue.py             # SQLite 佇列 + 狀態機 + cost_ledger 持久化油表
   runner.py                 # 三停六分支 run_loop（重啟後從 DB 重建油表）
   inspector.py              # A 巡檢器：跑本地 pytest，失敗去重後產任務入佇列

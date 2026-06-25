@@ -57,6 +57,27 @@ cd ~/agent-sandbox
 2. 跨 session 要記東西 → 腦庫（`knowledge-*`）。session 內傳狀態 → 黑板。
 3. 背景/排程/自修復 → `/queue/push` + heartbeat daemon（見 [docs/heartbeat-daemon.md](docs/heartbeat-daemon.md)）。
 4. **接手前先讀 [`.scream-code/handoff-next-session.md`](.scream-code/handoff-next-session.md)** 拿目前進度與下一棒。
+5. **永久核心目標在 [`.scream-code/core-goal.md`](.scream-code/core-goal.md)** — 高於本文件的最高指導原則。
+
+## 自主運作行為
+
+此專案已設定**永久核心目標**（core-goal）。接手後：
+- 完成任務後**自動分析下一步**，不等指令
+- 每天 **8:00 CST $5 預算重置**時 cron 喚醒繼續工作
+- 遇到紅線/架構決策才停，否則直接繼續
+- 定期報告進度即可
+
+## 新增模組地圖
+
+| 模組 | 位置 | 說明 |
+|------|------|------|
+| **腦庫** (知識庫) | `orchestrator/knowledge.py` | SQLite FTS5 跨 session 持久記憶 |
+| **記憶固化** | `orchestrator/auto_consolidate.py` | verify verdict → brain gene（pass/bug-fix） |
+| **評測閉環** | `orchestrator/metrics.py` + `reflect.py` | eval → 指標收集 → 反思提案 |
+| **修復查腦庫** | `orchestrator/repair.py` | call LLM 前先查 brain 相關經驗 |
+| **Triage 建議** | `orchestrator/triage.py` | escalated 任務自動搜 brain 給建議 |
+| **Eval Scoring** | `scripts/run_eval.py` | 路由管線打分，heartbeat 定期觸發 |
+| **連結/迭代** | `knowledge.py` | update/link/prune/confidence schema |
 
 ## 紅線
 

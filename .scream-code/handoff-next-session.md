@@ -1,7 +1,10 @@
 # AgentOS — 接續提示詞（Session 接力）
 
-> 本文件記錄前一 session（2026-06-20）的完成事項與當前狀態，
+> 本文件記錄前一 session 的完成事項與當前狀態，
 > 讓接手的新 session 可以直接接上，不用重讀整個專案。
+>
+> **接手第一件事：讀 [core-goal.md](core-goal.md) — 這是永久核心目標，
+> 定義了所有行動的最高指導原則和決策框架。**
 
 ---
 
@@ -132,13 +135,16 @@ Backlog: clarify_routing UI / headless / 沙箱 / Model Router
 - `/task/verify` 通過/撞線後自動萃取 gene 存 brain，response 帶 `consolidated` keys
 - 只在 pass/escalate 觸發（skip retry），`settings.auto_consolidate` 預設 on 可關
 
-### 下一個任務：無硬性指定
+### 下一個任務：請參考 core-goal.md 的決策框架自主決定
 
-核心循環 + 自修復 + 自我成長皆已閉環。建議讓 `heartbeat` 實跑一段，用真實 trace 餵
-`OPTIMIZATION.md` 評測集，量出下一個值得投資的點，而非預先蓋 Session B。
+核心循環 + 自修復 + 自我成長 + 記憶四維皆已閉環。
+目前狀態：（跑 pytest 看即時數）
 
-**Session B（Model Router）擱置**：評估後多半已由 `router/mapping.py`（按任務類型選模型）
-+ `runner` 的 `cost_ledger`/撞線停覆蓋。詳見 `.scream-code/optimization-report-2026-06-22.md`。
+自主運作已設定：
+- `core-goal.md` — 永久核心目標（高於本文件）
+- `CreateGoal` 已註冊 — durable goal 跨 session 持續
+- Cron `0 8 * * *` — 每日 8:00 CST 自動喚醒開始自主工作
+- 行為規則：完成任務後自動分析下一步並繼續（不等指令）
 
 ### 紅線提醒
 

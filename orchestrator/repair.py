@@ -134,13 +134,25 @@ def _extract_repair_keywords(fingerprint: str) -> str:
 
 def _retrieve_brain_context(query: str, max_results: int = 3) -> str:
     """Search knowledge base for related past experience.
-
+    
+    Searches raw query first, then falls back to gene/ prefix search
+    (gene/coding/, gene/debugging/) for broader matching.
+    
     Returns a formatted string to prepend to the prompt, or '' if nothing found.
     Uses deferred import to avoid circular dependency with orchestrator.knowledge.
     """
     from orchestrator import knowledge
 
+    # Try direct search first
     entries = knowledge.search_knowledge(query, limit=max_results)
+    
+    # Fallback: if nothing found, try gene/coding + gene/debugging prefix
+    if not entries:
+        for prefix in [f"gene/coding/{query[:20]}", f"gene/debugging/{query[:20]}"]:
+            entries = knowledge.read_knowledge(prefix, limit=max_results)
+            if entries:
+                break
+    
     if not entries:
         return ""
     lines = ["\nRelated past experience from knowledge base:"]

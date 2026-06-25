@@ -96,6 +96,12 @@ def suggest_fix(task: dict, max_results: int = 3) -> dict[str, Any] | None:
         total = len(query_words | content_words) or 1
         similarity = round(overlap / total, 2) if total > 0 else 0.0
 
+        # Track brain access so confidence decays for unused entries
+        try:
+            knowledge.record_access(r.get("id", ""))
+        except Exception:
+            pass
+
         suggestions.append({
             "key": key,
             "content": content,

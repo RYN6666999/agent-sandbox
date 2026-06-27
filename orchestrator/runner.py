@@ -354,6 +354,12 @@ def run_loop(
             budget_exhausted = True
             break
 
+        # /goal 條件檢查：已完成目標則提早停止
+        from orchestrator.state import goal_reached  # noqa: late import
+        if goal_reached(stats):
+            logger.info("[runner] run_loop stopped: /goal condition met")
+            break
+
         task = task_queue.next_pending()
         if task is None:
             logger.info("[runner] run_loop: queue empty, stopping")

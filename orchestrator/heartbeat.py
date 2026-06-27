@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from orchestrator.runner import GLOBAL_BUDGET_USD, run_loop
 from orchestrator import inspector as _inspector
 from orchestrator import task_queue
-from orchestrator.state import load_state, update_from_beat
+from orchestrator.state import load_state, update_from_beat, spec_freshness_check, mark_pending_review
 
 # ── 常數 ─────────────────────────────────────────────────────────────────────
 
@@ -81,6 +81,17 @@ def _get_queue_depth() -> int:
         return 0
 
 
+def _load_max_runtime() -> int | None:
+    """Read max_loop_runtime_seconds from settings.json."""
+    try:
+        import json
+        sp = Path(__file__).resolve().parent.parent / "data" / "settings.json"
+        val = json.loads(sp.read_text()).get("max_loop_runtime_seconds", 0)
+        return int(val) if int(val) > 0 else None
+    except Exception:
+        return None
+
+
 # ── 單拍邏輯 ─────────────────────────────────────────────────────────────────
 
 def run_once(
@@ -121,6 +132,18 @@ def run_once(
         _state.get("last_beat_status", "unknown"),
         _state.get("queue_depth", 0),
     )
+
+    # ── Step 0a：SPEC 新鮮度檢查 — 防目標漂移 ─────────────────────────────────
+    spec_info = spec_freshness_check()
+    if spec_info["exists"]:
+        logger.info(
+            "%s spec \"%s\" — last modified %s",
+            BEAT_LOG_PREFIX, Path(spec_info["spec_path"]).name, spec_info["mtime_iso"],
+        )
+    else:
+        logger.warning(
+            "%s spec file not found: %s", BEAT_LOG_PREFIX, spec_info["spec_path"],
+        )
 
     # ── Step 1：門口保全 — 油表預檢 ──────────────────────────────────────────
     spent_before = task_queue.ledger_spent_today()
@@ -185,6 +208,18 @@ def run_once(
             global_budget_usd,
         )
 
+    # ── Step 3a：HITL 閘門 — escalated 任務寫入 .pending_review ────────────
+    loop_result = loop or {}
+    mark_pending_review({
+        "beat_n": beat_n,
+        "loop": loop_result,
+    })
+    if loop_result.get("escalated", 0) > 0:
+        logger.info(
+            "%s beat #%d — %d escalated tasks → .pending_review written",
+            BEAT_LOG_PREFIX, beat_n, loop_result["escalated"],
+        )
+
     # ── 定期 prune 腦庫（機率觸發，~每 50 拍約 ~4 小時一次） ───────────────────
     if _random.random() < 0.02:
         try:
@@ -230,17 +265,23 @@ def run_forever(
     global_budget_usd: float = GLOBAL_BUDGET_USD,
     min_interval: int = DEFAULT_MIN_INTERVAL,
     max_interval: int = DEFAULT_MAX_INTERVAL,
+    max_runtime: int | None = None,
 ) -> None:
     """無限心跳 daemon。
 
     每拍：run_once() → sleep(interval)。
     預算耗盡時繼續睡（不 exit），等 localtime 跨日 cost_ledger 歸零後自然復活。
     KeyboardInterrupt / SIGTERM 正常結束。
+    支援 max_runtime 秒數後 graceful shutdown。
     """
     current_interval = interval
+    daemon_start = time.time()
+    if max_runtime is None:
+        max_runtime = _load_max_runtime()
     logger.info(
-        "%s daemon started (initial_interval=%ds, min=%ds, max=%ds, budget=%.2f)",
+        "%s daemon started (initial_interval=%ds, min=%ds, max=%ds, budget=%.2f, max_runtime=%s)",
         BEAT_LOG_PREFIX, current_interval, min_interval, max_interval, global_budget_usd,
+        f"{max_runtime}s" if max_runtime else "unlimited",
     )
     beat_n = 0
 
@@ -254,6 +295,16 @@ def run_forever(
 
     try:
         while True:
+            # ── 全域時間上限檢查 ─────────────────────────────────────────────
+            if max_runtime:
+                elapsed = time.time() - daemon_start
+                if elapsed >= max_runtime:
+                    logger.warning(
+                        "%s daemon stopping: max runtime reached (%.1fs >= %ds)",
+                        BEAT_LOG_PREFIX, elapsed, max_runtime,
+                    )
+                    break
+
             try:
                 result = run_once(global_budget_usd=global_budget_usd, beat_n=beat_n)
                 # 根據佇列深度調整下次間隔

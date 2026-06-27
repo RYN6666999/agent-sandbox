@@ -44,8 +44,10 @@ jobs:
             Keep the existing structure:
             - Frontmatter (name, description)
             - ⚡ 進場檢查（Immediate Action）
+            - 📖 前置記憶召回（Pre-task Memory Recall）
             - ⚠️ Anti-hallucination：常見錯誤
             - Main content (接上, 怎麼用, 工作流, 紅線)
+            - ✅ 完成回饋（Post-task Memory Store）
             - 🔄 Skill Interface
 
             After updating, create a pull request with title:

@@ -48,6 +48,42 @@ _PATTERN_TRIGGERS: list[re.Pattern] = [
 ]
 
 
+# ── restricted paths ──────────────────────────────────────────────────────────
+
+def _load_restricted_paths() -> list[str]:
+    """Read restricted_paths from settings.json."""
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+        sp = _Path(__file__).resolve().parent.parent / "data" / "settings.json"
+        return _json.loads(sp.read_text()).get("restricted_paths", [])
+    except Exception:
+        return []
+
+
+_RESTRICTED_PATHS_CACHE: list[str] = []
+
+
+def touches_restricted_path(text: str) -> tuple[bool, list[str]]:
+    """Check whether a command string references any restricted directory.
+
+    Returns:
+        (False, [])           — no restricted path referenced
+        (True,  [path, …])   — matched restricted paths
+    """
+    global _RESTRICTED_PATHS_CACHE
+    if not _RESTRICTED_PATHS_CACHE:
+        _RESTRICTED_PATHS_CACHE = _load_restricted_paths()
+    if not _RESTRICTED_PATHS_CACHE:
+        return False, []
+    lo = text.lower()
+    matched: list[str] = []
+    for rp in _RESTRICTED_PATHS_CACHE:
+        if rp.lower() in lo:
+            matched.append(rp)
+    return bool(matched), matched
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def is_dangerous(text: str) -> tuple[bool, list[str]]:
@@ -73,3 +109,16 @@ def is_dangerous(text: str) -> tuple[bool, list[str]]:
                 matched.append(token)
 
     return bool(matched), matched
+
+
+def check_command(text: str) -> tuple[bool, list[str]]:
+    """Combined gate check: dangerous command OR restricted path.
+
+    Returns:
+        (False, [])           — safe
+        (True,  [reason, …])  — blocked; reasons explain what matched
+    """
+    danger, danger_reasons = is_dangerous(text)
+    restricted, restricted_reasons = touches_restricted_path(text)
+    reasons = danger_reasons + restricted_reasons
+    return bool(reasons), reasons

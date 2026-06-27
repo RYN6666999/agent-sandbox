@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from orchestrator.runner import GLOBAL_BUDGET_USD, run_loop
 from orchestrator import inspector as _inspector
 from orchestrator import task_queue
+from orchestrator.state import load_state, update_from_beat
 
 # ── 常數 ─────────────────────────────────────────────────────────────────────
 
@@ -90,11 +91,13 @@ def run_once(
     """執行一拍心跳。
 
     流程：
+      0. 讀 state.json（agent forgets, file remembers）
       1. 讀油表（ledger_spent_today）：預算耗盡 → log + return early
       2. 執行 inspector.run_inspection()（最多 PYTEST_TIMEOUT=120s）
       3. 執行 runner.run_loop()（傳入同一個 global_budget_usd）
       4. log 本拍摘要
-      5. 回傳本拍結果 dict
+      5. 更新 state.json
+      6. 回傳本拍結果 dict
 
     回傳格式：
     {
@@ -108,6 +111,17 @@ def run_once(
     """
     logger.info("%s beat #%d started (budget=%.2f)", BEAT_LOG_PREFIX, beat_n, global_budget_usd)
 
+    # ── Step 0：讀狀態檔案 — agent 會忘記，但檔案記得 ──────────────────────────
+    _state = load_state()
+    logger.info(
+        "%s prior state — beat=%d last_run=%s status=%s queue=%d",
+        BEAT_LOG_PREFIX,
+        _state.get("last_beat_n", 0),
+        _state.get("last_run", "never"),
+        _state.get("last_beat_status", "unknown"),
+        _state.get("queue_depth", 0),
+    )
+
     # ── Step 1：門口保全 — 油表預檢 ──────────────────────────────────────────
     spent_before = task_queue.ledger_spent_today()
     if spent_before >= global_budget_usd:
@@ -116,7 +130,7 @@ def run_once(
             "sleeping until rollover (localtime midnight)",
             BEAT_LOG_PREFIX, beat_n, spent_before, global_budget_usd,
         )
-        return {
+        result = {
             "beat_n": beat_n,
             "budget_exhausted_pre": True,
             "spent_before": spent_before,
@@ -126,6 +140,8 @@ def run_once(
             "queue_depth": 0,
             "next_interval": 0,  # outside caller decides
         }
+        update_from_beat(result)
+        return result
 
     logger.info(
         "%s beat #%d — oil gauge %.4f / %.2f, proceeding to inspection",
@@ -192,7 +208,8 @@ def run_once(
         except Exception:
             pass
 
-    return {
+    # ── 更新 state.json ───────────────────────────────────────────────────────
+    result = {
         "beat_n": beat_n,
         "budget_exhausted_pre": False,
         "spent_before": spent_before,
@@ -201,6 +218,8 @@ def run_once(
         "budget_exhausted_post": budget_exhausted_post,
         "queue_depth": _get_queue_depth(),
     }
+    update_from_beat(result)
+    return result
 
 
 # ── daemon ────────────────────────────────────────────────────────────────────

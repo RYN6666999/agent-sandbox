@@ -1,0 +1,35 @@
+name: Agent Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Review this PR for:
+            1. **Correctness** — Does the code do what it claims?
+            2. **Safety** — Any dangerous patterns (rm -rf, eval, shell injection)?
+            3. **AgentOS idioms** — Does it follow the existing patterns in checker.py, decision_log.py, safety.py?
+            4. **Edge cases** — What happens on error paths?
+            5. **Test coverage** — Are there tests for the new code?
+
+            Focus on the diff. Be concise. Flag blocking issues first.

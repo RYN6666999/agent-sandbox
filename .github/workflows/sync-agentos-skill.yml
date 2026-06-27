@@ -1,0 +1,59 @@
+name: Sync AgentOS Scream Skill
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to sync skill from (e.g., v0.2.0)'
+        required: false
+        default: 'main'
+
+jobs:
+  sync-skill:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout agent-sandbox repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Run Claude Code to sync skill
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: 'RYN6666999[bot]'
+          prompt: |
+            Read the skill template in '.scream-code/skill-sources/agentos/SKILL.md'.
+            Read the current source code (especially api/, orchestrator/, scripts/).
+            Read CHANGELOG or git log to understand what changed since last release.
+
+            Update the SKILL.md to reflect:
+            - Any new/changed CLI commands in scripts/
+            - Any new/changed API endpoints in api/
+            - Any new/changed orchestrator features
+            - Update version numbers if applicable
+
+            Keep the existing structure:
+            - Frontmatter (name, description)
+            - ⚡ 進場檢查（Immediate Action）
+            - ⚠️ Anti-hallucination：常見錯誤
+            - Main content (接上, 怎麼用, 工作流, 紅線)
+            - 🔄 Skill Interface
+
+            After updating, create a pull request with title:
+            "Sync agentos skill to ${{ github.event.release.tag_name || inputs.version || 'latest' }}"
+
+      # If CLAUDE_CODE_OAUTH_TOKEN is not set, this step fails gracefully
+      - name: Fallback — manual sync note
+        if: failure()
+        run: |
+          echo "⚠️ Sync requires CLAUDE_CODE_OAUTH_TOKEN secret to be set."
+          echo "Set it in repo Settings → Secrets and variables → Actions"

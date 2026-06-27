@@ -38,12 +38,20 @@ _QUESTION_STARTERS = (
     "can ", "does ", "do ", "explain", "describe", "tell me",
 )
 
+# Chinese question particles anywhere in the sentence indicate a question
+_CHINESE_QUESTION_PARTICLES = re.compile(
+    r'(什麼|為什麼|如何|怎麼|哪[裡個]|是否|有沒有|'
+    r'嗎$|呢$|吧$|'
+    r'多[長大重少久高寬深]|'      # 多長、多大、多重、多少、多久…
+    r'誰|幾[個次天月年]|什麼時候)'
+)
+
 # Action verbs: presence means the user has a concrete intent → not vague
 _ACTION_RE = re.compile(
     # Chinese action verbs (character-level, no word boundary needed)
     r'(做|建立|建|測試|測|寫|改|加入|加|設計|實作|實現|生成|幫|分析|查詢|查|找|列出|列'
     r'|計算|算|解決|解|執行|跑|產生|整理|比較|評估|修復|修|優化|翻譯|翻|轉換|轉'
-    r'|抓取|抓|取得|取|刪除|刪|更新|驗證|驗|示範|展示|說明|解釋'
+    r'|抓取|抓|取得|取|刪除|刪|更新|驗證|驗|示範|展示|說明|解釋|說|講|問'
     # English action verbs (word boundary)
     r'|\bmake\b|\bbuild\b|\btest\b|\bwrite\b|\bcreate\b|\bimplement\b'
     r'|\badd\b|\bfix\b|\banalyze\b|\bexplain\b|\bfind\b|\blist\b'
@@ -72,15 +80,17 @@ def _is_vague(text: str) -> bool:
         return False
     if any(lo.startswith(q) for q in _QUESTION_STARTERS):
         return False
+    if _CHINESE_QUESTION_PARTICLES.search(t):
+        return False
 
-    # Hard minimum length
-    if len(t) < CLARIFY_MIN_LEN:
-        return True
-
-    # Has a concrete action verb → likely complete enough (check before whitespace
-    # so Chinese phrases without spaces aren't wrongly flagged as single-word)
+    # Has a concrete action verb → likely complete enough (check before min length
+    # so short-but-complete commands like "說你好" aren't wrongly flagged)
     if _ACTION_RE.search(t):
         return False
+
+    # Hard minimum length — only now that verbs & questions have been ruled out
+    if len(t) < CLARIFY_MIN_LEN:
+        return True
 
     # Single word (no whitespace, no verb already matched above)
     if not re.search(r'\s', t):

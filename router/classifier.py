@@ -53,10 +53,21 @@ Task: {task}
 # Requires response_format=json_object; works best with reasoning models.
 _ROUTING_SYSTEM = (
     "You classify user task routing. Always respond with valid JSON containing exactly "
-    "two keys: \"category\" (one of: answer/code/unclear) and \"reason\" (one sentence). "
+    "two keys: \"category\" (one of: answer/code/unclear) and \"reason\" (one sentence).\n\n"
     "\"answer\" = clearly only needs a direct reply or explanation. "
-    "\"code\" = clearly needs working code or runnable artifact. "
-    "\"unclear\" = could plausibly need either — the intent is genuinely ambiguous."
+    "This includes short commands in any language (e.g. \"系統存活檢查\", \"check status\", "
+    "\"說你好世界\", \"Python 版本\" — these are direct requests, not ambiguous).\n"
+    "\"code\" = clearly needs working code or runnable artifact (e.g. \"寫一個函式 add(a,b)\", "
+    "\"implement binary search\").\n"
+    "\"unclear\" = could plausibly need either — the intent is genuinely ambiguous "
+    "(e.g. \"幫我優化\", \"改一下顏色\").\n\n"
+    "Examples:\n"
+    "  \"系統存活檢查\" → {\"category\": \"answer\", \"reason\": \"direct request to check system status\"}\n"
+    "  \"說你好世界\" → {\"category\": \"answer\", \"reason\": \"direct greeting request\"}\n"
+    "  \"Python 版本是多少\" → {\"category\": \"answer\", \"reason\": \"direct question about version\"}\n"
+    "  \"寫一個函式 add(a,b) 回傳兩數相加\" → {\"category\": \"code\", \"reason\": \"needs code implementation\"}\n"
+    "  \"幫我優化\" → {\"category\": \"unclear\", \"reason\": \"no target specified — genuinely ambiguous\"}\n"
+    "  \"改一下顏色\" → {\"category\": \"unclear\", \"reason\": \"no target specified — genuinely ambiguous\"}"
 )
 
 

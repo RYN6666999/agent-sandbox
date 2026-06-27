@@ -61,10 +61,18 @@
 
 ```
 階段二完成 🎉  Session C Scheduler 完成 🎉  Session D Auto-Consolidate 完成 🎉
-下一棒: 無硬性 — 跑起來看真實使用再定（Model Router 擱置）
+評測閉環完成 🎉  Eval 15/15 🎉  OPTIMIZATION.md 全部填滿 🎉
+下一棒: eval 穩定後可擴充場景數（目前 15 題）、改善 classifier 信度量測
 Backlog: clarify_routing UI / headless / 沙箱 / Model Router
 ```
 
 說明：核心四循環（safety/clarify/route/verify）+ 自修復迴圈（Scheduler）+ 自我成長
-（Auto-Consolidate）皆已閉環。系統可自跑、自修、自記。下一步建議：讓 heartbeat 實跑一段，
-用真實 trace 餵 OPTIMIZATION.md 的評測集，量出下一個值得投資的點。
+（Auto-Consolidate）+ OPTIMIZATION.md 閉環（eval/metrics/reflect）皆已閉環並實戰驗證。
+系統可自跑、自修、自記、自評。
+
+**Round 3 實戰結果（2026-06-27）：**
+- 發現三層疊加 bug（clarify 順序 → eval script tuple truth → classifier dataclass）
+- Eval 從 9/15 → 15/15
+- 測試從 300+ → 365 passed
+- OPTIMIZATION.md 所有（待填）已填入實戰數據
+- 下一個值得投資的點：擴充 eval 場景數（>20 題）、量測 classifier 信度穩定度

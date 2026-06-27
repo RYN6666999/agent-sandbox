@@ -48,8 +48,8 @@ def run_scenario(scenario: dict) -> dict:
                 "score": score, "passed": passed, "gate": "safety"}
 
     # Stage 2: Clarify gate (rule-based, no LLM)
-    clar = needs_clarification(task)
-    if clar:
+    clar_result = needs_clarification(task)
+    if clar_result[0]:
         actual_routing = "unclear"
         # 先判斷 safety 再判斷 clarify：clarify 期望的 stop 是 pass
         actual_stop = "pass"
@@ -60,7 +60,7 @@ def run_scenario(scenario: dict) -> dict:
 
     # Stage 3: Router (rule-based classifier, no LLM)
     intent = routing_intent(task)
-    actual_routing = intent.get("intent", "answer") if intent else "answer"
+    actual_routing = intent.category if intent else "answer"
 
     if actual_routing == expected_routing:
         score = 10.0

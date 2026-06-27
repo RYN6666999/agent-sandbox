@@ -15,11 +15,13 @@ from orchestrator.clarify import (
 
 class TestIsVague:
     # --- should trigger ---
-    def test_single_word_chinese(self):
-        assert _is_vague("測試") is True
+    def test_action_verb_is_clear(self):
+        """'測試' contains action verb '測' → clear, not vague."""
+        assert _is_vague("測試") is False
 
-    def test_single_word_english(self):
-        assert _is_vague("test") is True
+    def test_action_verb_english(self):
+        """'test' is an English action verb → clear."""
+        assert _is_vague("test") is False
 
     def test_very_short(self):
         assert _is_vague("hi") is True
@@ -63,12 +65,12 @@ class TestIsVague:
 
 class TestNeedsClarificationTriggered:
     def test_short_input_triggers(self):
-        """「測試」→ should_clarify=True, question is non-empty."""
+        """「API」→ should_clarify=True, question is non-empty."""
         mock_resp = MagicMock()
-        mock_resp.choices[0].message.content = "你想測試什麼？是某段程式碼，還是整個流程？"
+        mock_resp.choices[0].message.content = "你想對 API 做什麼？"
 
         with patch("orchestrator.clarify.litellm.completion", return_value=mock_resp):
-            should, question = needs_clarification("測試")
+            should, question = needs_clarification("API")
 
         assert should is True
         assert len(question) > 0
@@ -87,12 +89,12 @@ class TestNeedsClarificationTriggered:
     def test_question_is_context_aware(self):
         """Generated question should not be completely generic — mock returns specific text."""
         mock_resp = MagicMock()
-        mock_resp.choices[0].message.content = "你想要測試哪段程式碼？"
+        mock_resp.choices[0].message.content = "你想要對 API 做什麼？"
 
         with patch("orchestrator.clarify.litellm.completion", return_value=mock_resp):
-            _, question = needs_clarification("測試")
+            _, question = needs_clarification("API")
 
-        assert "測試" in question or "程式" in question or "?" in question or "？" in question
+        assert "API" in question or "?" in question or "？" in question
 
 
 # ── Case B: complete input does NOT trigger clarification ─────────────────────
@@ -168,7 +170,7 @@ class TestLlmFallback:
     def test_llm_error_returns_template_not_raises(self):
         """If LLM fails, _generate_question returns a fallback, never raises."""
         with patch("orchestrator.clarify.litellm.completion", side_effect=Exception("quota")):
-            should, question = needs_clarification("測試")
+            should, question = needs_clarification("API")
 
         assert should is True
         assert len(question) > 0  # fallback template kicks in

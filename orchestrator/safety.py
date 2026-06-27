@@ -26,6 +26,12 @@ _LITERAL_TRIGGERS: list[str] = [
     "格式化硬碟",
     "格式化磁碟",
     "> /dev/",            # redirect-to-device overwrite
+    # System-level destructive commands
+    "shutdown",
+    "reboot",
+    "poweroff",
+    "init 0",
+    "halt",
 ]
 
 # Regex patterns (case-insensitive, compiled once).

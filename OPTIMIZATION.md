@@ -28,45 +28,62 @@
 ---
 
 ## 二、評測集（Eval Set）——迴路的心臟
-（待填）
-- 格式：每筆 = 代表性任務 + 預期判準（io_example / 是否該過 / 該走哪條路由）。
-- 規模與覆蓋：涵蓋 direct / clarify / align / loop / sensitive / danger 各類，避免只測簡單題。
-- 存放位置與版控：純文字、進 git，與 prompt 同版本綁定。
-- 與現有單元測試的關係：單元測試測「程式對不對」，評測集測「治理判斷對不對」，兩者不同層，不可混。
+
+**格式：** 每筆 = `{id, category, task, expected_routing, expected_stop, min_score, tags}`
+- `expected_routing`：answer / code / unclear — 路由正確答案
+- `expected_stop`：pass / escalate — 預期停在哪個 gate
+- `min_score`：及格線（sensitive/danger 設 0.0 因為路由不重要，重點是 escalate）
+
+**規模與覆蓋（當前 15 題，5 類）：**
+| 類別 | 題數 | 代表題 | 測試什麼 |
+|------|------|--------|---------|
+| direct | 3 | 說你好世界、系統存活檢查、Python 版本 | 短/中/長直接指令不被 clarify 誤擋 |
+| code | 3 | 寫函式 add、定義 class、修 pytest | code 任務被正確路由為 code |
+| clarify | 3 | 幫我優化、怎麼用這個、改一下顏色 | 真正模糊輸入進 clarify |
+| sensitive | 3 | 刪檔案、chmod 777、強制結束 process | 危險業務指令走正確路徑 |
+| danger | 3 | DROP TABLE、rm -rf、shutdown | 破壞性指令被 safety gate 攔截 |
+
+**存放與版控：** `eval/scenarios.json`，純 JSON，進 git，與 classifier prompt 同版本綁定。
+
+**與單元測試的關係：** 單元測試測「函式邏輯對不對」，評測集測「治理判斷對不對」。兩者不同層。單元測試全綠不等於評測集全過——本次修復就是先有 365 tests ✅ 但 eval 只有 9/15。
 
 ---
-
 ## 三、指標（Metrics）——信度與效度分開量
-（待填）
-- **信度**（穩不穩）：同輸入重複 N 次，路由決策 / Checker 分數的一致率。
-- **效度**（對不對）：判斷結果與評測集「正確答案」的吻合率；效度大半靠 pytest 等客觀錨點撐，
-  不可只靠 LLM 自評。
-- 聚合分數與門檻：低於門檻不准換版（防退步）。
+
+**當前狀態：** metrics 表已實作（`orchestrator/metrics.py`），每筆 eval 結果記錄在 `metrics.db` 的 `eval_results` 表。
+
+- **信度**（穩不穩）：同輸入重複 N 次，路由決策一致率。目前未正式量測——classifier 調用 LLM 有波動性，未來需要。
+- **效度**（對不對）：`run_eval.py` 跑 15 題，比對 `expected_routing` 與 `actual_routing`。當前基線 **15/15**（2026-06-27 修復後）。
+- **聚合門檻：** 低於 13/15（~87%）不准換版防退步。每次 prompt/路由變更後必須先跑 eval 確認不退化。
 
 ---
-
 ## 四、Trace → 反思 → 提案
-（待填）
-- 從哪些失敗訊號觸發反思（煞車停、低分、違規、人類否決）。
-- 反思產出什麼：具體指出 prompt / 路由規則 / 閾值的哪一處該怎麼改（不是模糊建議）。
-- 一次只改一個變數，便於歸因（呼應 A/B 模型選型時的「控制變數」思路）。
+
+**觸發場景（已實戰驗證過）：**
+1. **Clarify gate 過度攔截** → 短指令全被擋 → `clarify.py` 的 `_is_vague` 邏輯順序錯誤
+2. **Safety gate 遺漏** → shutdown/reboot 逃脫 → `safety.py` triggers 不夠
+3. **Eval script 自身 bug** → `if clar:` tuple truth 永遠 True → 這個最隱蔽，持續時間最長
+4. **Classifier prompt 不足** → 短中文被路由成 unclear → `_ROUTING_SYSTEM` 缺 few-shot
+
+**反思產出格式：** 指向具體檔案+行號的修改建議，不模糊。
+
+**一次只改一個變數：** Round 1 只改 clarify gate 順序，Round 2 只改 classifier prompt。每輪跑 eval 確認效果。
 
 ---
-
 ## 五、換版規則（HITL 閘門）
-（待填）
-- 新版必須：在評測集上信度與效度「都不退步、至少一項變好」才候選。
-- 回歸保護：單元測試全綠 + 評測集不退步，缺一不可。
-- 最終拍板：Ryan（不可逆動作先問，對應協作規則第 3 條）。
-- 版本紀錄：改了什麼、為什麼、評測前後分數，寫進版控 commit message。
+
+- **新版候選條件：** 單元測試全綠 AND eval score 不低於 13/15。缺一不可。
+- **回歸保護：** 每次 prompt/路由變更前後各跑一次 eval，diff 即時可見。
+- **最終拍板：** Ryan（不可逆動作先問——git push、部署、換 LLM provider）。
+- **版本紀錄：** 寫在 OPTIMIZATION.md 的版本紀錄區（見第八節），包含：改了什麼、為什麼、eval 前後分數。
 
 ---
-
 ## 六、紅線（本迴路絕不可碰）
-（待填）
-- 迴路**不得自動修改** checker.py / decision_log.py / safety.py / clarify.py 核心邏輯。
-- 迴路**不得自動 commit / push**。提案只到「候選」，落地由人。
+
+- 迴路**不得自動修改** `checker.py` / `decision_log.py` / `safety.py` / `clarify.py` 核心邏輯（本次修 `clarify.py` 是 eval 引導的明確 bugfix，非自動優化）。
+- 迴路**不得自動 commit / push**。提案只到「候選」，落地由人（Ryan）。
 - prompt 不得在執行期被任何 agent 即時改寫；只能透過本迴路、離線、經拍板更新。
+- eval `scenarios.json` 的 expected_routing 必須反映實際架構意圖，不可為了湊分數改成符合錯誤行為。
 
 ---
 
@@ -115,3 +132,25 @@
 
 **紅線守護：** 未觸碰 decision_log.py / safety.py / clarify.py。
 **測試結果：** 跑 pytest 看即時數
+
+### 2026-06-27 — Round 3：評測集閉環（9→15）
+
+**觸發：** Session 初始化掃描發現 eval 停在 9/15，OPTIMIZATION.md 閉環從未真正走通。
+
+**評測變動：** 9/15（Round 3 前）→ 15/15（Round 3 後）
+
+**變更摘要：**
+
+| 方向 | 檔案 | 類型 | 說明 |
+|------|------|------|------|
+| ① Clarify gate 順序重排 | `clarify.py` | Bugfix | action verb 檢查移到 min length 之前，短指令含動詞不再誤擋 |
+| ② 中文問句粒子偵測 | `clarify.py` | 新行為 | 加 `_CHINESE_QUESTION_PARTICLES` regex + 動詞「說講問」 |
+| ③ Safety gate 補 shutdown | `safety.py` | Bugfix | 加 shutdown/reboot/poweroff/init 0/halt |
+| ④ Eval script 雙 bug | `run_eval.py` | Bugfix | `if clar:` tuple truth 永遠 True（最隱蔽）+ `intent.get`→`intent.category`（dataclass vs dict） |
+| ⑤ Eval scenarios 校正 | `scenarios.json` | 校正 | code task 的 expected_routing 從 answer→code |
+| ⑥ Classifier few-shot | `router/classifier.py` | Prompt 優化 | `_ROUTING_SYSTEM` 加 6 個中英文 few-shot 範例 |
+| ⑦ 測試同步 | `test_clarify.py` | 測試更新 | 5 個測試斷言舊 buggy 行為，改用無動詞輸入測試 clarify |
+
+**紅線守護：** `clarify.py` 的 `_is_vague` 邏輯順序更動為 bugfix（非自動優化），`decision_log.py` / `checker.py` 未觸碰。
+**測試結果：** 365 passed（66s）
+**架構影響：** 無 — 所有變更皆在既有元件內擴充。

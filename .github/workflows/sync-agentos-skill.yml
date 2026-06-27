@@ -1,4 +1,4 @@
-name: Sync AgentOS Scream Skill
+name: Sync AgentOS Skill
 
 on:
   release:
@@ -6,56 +6,110 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag to sync skill from (e.g., v0.2.0)'
+        description: 'Version to sync from (e.g., v0.2.0)'
         required: false
         default: 'main'
 
 jobs:
-  sync-skill:
+  sync:
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
-      id-token: write
 
     steps:
-      - name: Checkout agent-sandbox repo
+      - name: Checkout this repo (agent-sandbox source)
         uses: actions/checkout@v4
         with:
+          path: source
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Run Claude Code to sync skill
-        uses: anthropics/claude-code-action@v1
+      - name: Checkout scream-code skills repo (target)
+        uses: actions/checkout@v4
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_bots: 'RYN6666999[bot]'
-          prompt: |
-            Read the skill template in '.scream-code/skill-sources/agentos/SKILL.md'.
-            Read the current source code (especially api/, orchestrator/, scripts/).
-            Read CHANGELOG or git log to understand what changed since last release.
+          repository: RYN6666999/scream-mods-tracker
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: target
+          fetch-depth: 1
 
-            Update the SKILL.md to reflect:
-            - Any new/changed CLI commands in scripts/
-            - Any new/changed API endpoints in api/
-            - Any new/changed orchestrator features
-            - Update version numbers if applicable
-
-            Keep the existing structure:
-            - Frontmatter (name, description)
-            - ⚡ 進場檢查（Immediate Action）
-            - 📖 前置記憶召回（Pre-task Memory Recall）
-            - ⚠️ Anti-hallucination：常見錯誤
-            - Main content (接上, 怎麼用, 工作流, 紅線)
-            - ✅ 完成回饋（Post-task Memory Store）
-            - 🔄 Skill Interface
-
-            After updating, create a pull request with title:
-            "Sync agentos skill to ${{ github.event.release.tag_name || inputs.version || 'latest' }}"
-
-      # If CLAUDE_CODE_OAUTH_TOKEN is not set, this step fails gracefully
-      - name: Fallback — manual sync note
-        if: failure()
+      - name: Collect context for skill update
+        id: context
         run: |
-          echo "⚠️ Sync requires CLAUDE_CODE_OAUTH_TOKEN secret to be set."
-          echo "Set it in repo Settings → Secrets and variables → Actions"
+          cd source
+          # Get recent changes
+          echo "=== Recent commits ===" > /tmp/context.txt
+          git log --oneline -20 >> /tmp/context.txt
+          echo "" >> /tmp/context.txt
+          echo "=== Current skill template ===" >> /tmp/context.txt
+          if [ -f .scream-code/skill-sources/agentos/SKILL.md ]; then
+            cat .scream-code/skill-sources/agentos/SKILL.md >> /tmp/context.txt
+          fi
+          echo "" >> /tmp/context.txt
+          echo "=== Changelog ===" >> /tmp/context.txt
+          if [ -f CHANGELOG.md ]; then
+            head -50 CHANGELOG.md >> /tmp/context.txt
+          fi
+          echo "context_size=$(wc -c < /tmp/context.txt)" >> $GITHUB_OUTPUT
+
+      - name: Generate updated SKILL.md via OpenRouter
+        id: generate
+        env:
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          VERSION: ${{ github.event.release.tag_name || inputs.version || 'latest' }}
+        run: |
+          CONTEXT=$(cat /tmp/context.txt)
+          PROMPT="你是 Scream Code 的技能維護 AI。根據提供的 context，更新 agentos SKILL.md。
+
+要求：
+1. 保留現有結構（進場檢查 → 前置記憶召回 → anti-hallucination → 主內容 → 完成回饋 → Skill Interface）
+2. 根據最近的 commits/changelog 更新 CLI 命令、API 端點、功能描述
+3. 更新版本號為 ${VERSION}
+4. 輸出純 Markdown，不要 Markdown code block 包裹
+
+Context:
+${CONTEXT:0:40000}"
+
+          JSON_BODY=$(jq -n \
+            --arg model "deepseek-v4-flash" \
+            --arg prompt "$PROMPT" \
+            '{
+              model: $model,
+              messages: [{role: "user", content: $prompt}],
+              max_tokens: 4000
+            }')
+
+          curl -s https://openrouter.ai/api/v1/chat/completions \
+            -H "Authorization: Bearer $OPENROUTER_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$JSON_BODY" | jq -r '.choices[0].message.content' > /tmp/updated_skill.md
+
+      - name: Create pull request with updated skill
+        run: |
+          cd target
+          SKILL_PATH=".scream-code/skills/agentos/SKILL.md"
+          mkdir -p "$(dirname $SKILL_PATH)"
+
+          # Check if the generated content looks valid (has frontmatter)
+          if grep -q "^---" /tmp/updated_skill.md; then
+            cp /tmp/updated_skill.md "$SKILL_PATH"
+          else
+            echo "⚠️ Generated content missing frontmatter, skipping"
+            exit 1
+          fi
+
+          BRANCH="sync-agentos-skill-${{ github.event.release.tag_name || github.sha }}"
+          git checkout -b "$BRANCH"
+          git add "$SKILL_PATH"
+          git commit -m "Sync agentos skill to ${{ github.event.release.tag_name || inputs.version || 'latest' }}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "Sync agentos skill to ${{ github.event.release.tag_name || inputs.version || 'latest' }}" \
+            --body "Auto-generated by sync-agentos-skill workflow.
+
+Triggered by release: ${{ github.event.release.tag_name || 'manual dispatch' }}
+Review the updated SKILL.md and merge if it looks correct." \
+            --repo RYN6666999/scream-mods-tracker || echo "PR already exists or error"

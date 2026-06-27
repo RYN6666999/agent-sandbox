@@ -1,0 +1,86 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        id: diff
+        run: |
+          gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr.diff
+          echo "diff_size=$(wc -c < /tmp/pr.diff)" >> $GITHUB_OUTPUT
+
+      - name: Skip review if diff too large (>50KB)
+        if: steps.diff.outputs.diff_size > 50000
+        run: |
+          gh pr review ${{ github.event.pull_request.number }} \
+            --comment "⚠️ 變更量大於 50KB，跳過自動 AI review。" \
+            || true
+          exit 0
+
+      - name: Run AI review via OpenRouter
+        id: review
+        env:
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          DIFF=$(cat /tmp/pr.diff)
+          PROMPT="你是一個嚴格的 code reviewer。審查以下 PR diff，輸出結構化結果：
+
+## 問題（依嚴重性排序）
+- [CRITICAL] 描述
+- [WARNING] 描述
+- [INFO] 描述
+
+## 總結
+一句話總結 PR 品質。
+
+## 檔案：<filename>
+- 問題：
+- 建議：
+
+---
+
+DIFF：
+\`\`\`diff
+${DIFF:0:30000}
+\`\`\`"
+
+          JSON_BODY=$(jq -n \
+            --arg model "deepseek-v4-flash" \
+            --arg prompt "$PROMPT" \
+            '{
+              model: $model,
+              messages: [{role: "user", content: $prompt}],
+              max_tokens: 2000
+            }')
+
+          curl -s https://openrouter.ai/api/v1/chat/completions \
+            -H "Authorization: Bearer $OPENROUTER_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$JSON_BODY" | jq -r '.choices[0].message.content' > /tmp/review.txt
+
+          echo "review_content<<EOF" >> $GITHUB_OUTPUT
+          cat /tmp/review.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Post review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr review ${{ github.event.pull_request.number }} \
+            --comment "$(cat /tmp/review.txt)" \
+            --repo ${{ github.repository }} || true

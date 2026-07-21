@@ -1,288 +1,296 @@
 #!/bin/bash
-# agentos.sh — Scream 端的 AgentOS API client
+# agentos.sh — AgentOS Runtime
 # 從 shell/curl 呼叫 AgentOS 的同步端點。
+# 升級：自動偵測本機工具 + 產生 runtime.json
 #
 # 用法:
-#   ./agentos.sh run "task description"
-#   ./agentos.sh run --executor claude-code "debug this bug"
-#   ./agentos.sh blackboard-read key_prefix
-#   ./agentos.sh blackboard-write key_prefix '{"data": {"value": 42}}'
-#   ./agentos.sh knowledge-write <key> <content>
-#   ./agentos.sh knowledge-read <key>
-#   ./agentos.sh knowledge-search <query>
-#   ./agentos.sh protocol list
-#   ./agentos.sh protocol show <name>
-#   ./agentos.sh protocol push <name>
-#   ./agentos.sh executors
-#   ./agentos.sh health
-#   ./agentos.sh --help
-#
-# 環境變數:
-#   AGENTOS_URL  — AgentOS base URL（預設 http://localhost:8000）
+#   ./agentos.sh init                    # 偵測工具 + 產生 runtime.json
+#   ./agentos.sh run "task description"  # 同步執行（自動路由工具）
+#   ./agentos.sh brain read <key>
+#   ./agentos.sh brain write <key> <val>
+#   ./agentos.sh brain search <query>
+#   ./agentos.sh tools                   # 列出已發現的工具
+#   ./agentos.sh health                  # 檢查所有工具狀態
+#   ./agentos.sh up                      # 啟動 server
+#   ./agentos.sh down                    # 停止
 
 set -euo pipefail
 
 BASE="${AGENTOS_URL:-http://localhost:8000}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROTOCOLS_DIR="${SCRIPT_DIR}/../protocols"
+AGENTOS_DIR="${SCRIPT_DIR}/.."
+RUNTIME_FILE="${AGENTOS_DIR}/agentos.json"
 
 usage() {
     cat <<EOF
 用法: $(basename "$0") <command> [args...]
 
-Commands:
-  up                                           一個指令接上（沒跑就自動起 server）
-  down                                         停掉 server
-  run [--executor litellm|claude-code] <task>  同步執行任務
-  blackboard-read <key_prefix>                 讀黑板上最新一筆
-  blackboard-write <key> <json>                寫一筆到黑板
-  knowledge-write <key> <content>              寫入知識條目
-  knowledge-read <key>                         依 key 前綴讀取知識
-  knowledge-search <query>                     全文搜尋知識
-  protocol list                                列出可用協議模板
-  protocol show <name>                         顯示協議模板內容
-  protocol push <name>                         推送協議模板到腦庫
-  executors                                    列出已註冊 executor
-  health                                       健康檢查
-  --help                                       顯示此說明
+Runtime 指令:
+  init             偵測本機工具 + 產生 agentos.json
+  tools            列出已發現的工具
+  health           檢查所有工具連線狀態
 
-環境變數:
-  AGENTOS_URL  AgentOS 基底 URL（預設 http://localhost:8000）
+AgentOS 指令:
+  up               啟動 server（沒跑就起）
+  down             停止
+  run <task>       同步執行任務（自動路由工具）
+  brain read <k>   讀腦庫
+  brain write <k> <v>  寫腦庫
+  brain search <q> 搜尋腦庫
+
+Aris Bridge 指令:
+  bridge up        啟動 agentos-aris-bridge daemon（背景）
+  bridge down      停止 bridge daemon
+  bridge status    檢查 bridge 運行狀態
+  bridge log       查看 bridge 日誌（tail -20）
+  bridge restart   重新啟動 bridge
 EOF
-    exit 0
+  echo ""
+  echo "  注意：codebase-memory-mcp cli 的 debug log 送 stderr"
+  echo "  JSON 解析時加 2>/dev/null 過濾。已在 agentos.sh 自動處理。"
 }
 
-# ── run ────────────────────────────────────────────────────────────────────
-cmd_run() {
-    local executor="litellm"
-    local task=""
+# ── Tool Discovery ────────────────────────────────────────
 
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --executor) executor="$2"; shift 2 ;;
-            *) task="$1"; shift ;;
-        esac
-    done
+detect_tools() {
+  local tools="{}"
 
-    if [[ -z "$task" ]]; then
-        echo "❌ 缺少 task。使用 --help 查看用法。" >&2
-        exit 1
-    fi
+  # codebase-memory-mcp
+  if command -v codebase-memory-mcp &>/dev/null; then
+    local cbm_ver
+    cbm_ver=$(codebase-memory-mcp --version 2>/dev/null | head -1)
+    tools=$(echo "$tools" | jq --arg v "$cbm_ver" '. + {"codebase-memory-mcp": {"status": "installed", "version": $v, "capabilities": ["code-graph", "search", "architecture", "trace"]}}' 2>/dev/null || echo "$tools")
+  fi
 
-    local body
-    body=$(printf '{"task": %s, "executor": %s}' \
-        "$(echo "$task" | jq -Rs '.' )" \
-        "$(echo "$executor" | jq -Rs '.' )")
+  # OpenCLI
+  if command -v opencli &>/dev/null; then
+    local oc_ver
+    oc_ver=$(opencli --version 2>/dev/null | head -1)
+    tools=$(echo "$tools" | jq --arg v "$oc_ver" '. + {"opencli": {"status": "installed", "version": $v, "capabilities": ["browser", "100+-sites"]}}' 2>/dev/null || echo "$tools")
+  fi
 
-    echo "▶ 執行任務: ${task:0:60}..." >&2
-    echo "  executor: $executor" >&2
+  # agentsview
+  if command -v agentsview &>/dev/null; then
+    local av_ver
+    av_ver=$(agentsview --version 2>/dev/null | head -1)
+    tools=$(echo "$tools" | jq --arg v "$av_ver" '. + {"agentsview": {"status": "installed", "version": $v, "capabilities": ["session-analytics", "token-tracking"]}}' 2>/dev/null || echo "$tools")
+  fi
 
-    local result
-    result=$(curl -s -X POST "$BASE/task/run" \
-        -H "Content-Type: application/json" \
-        -d "$body")
+  # headroom (Python package)
+  if python3 -c "import headroom" 2>/dev/null; then
+    tools=$(echo "$tools" | jq '. + {"headroom": {"status": "installed", "capabilities": ["token-compression", "content-routing", "ccr"]}}' 2>/dev/null || echo "$tools")
+  fi
 
-    local status
-    status=$(echo "$result" | jq -r '.status // "error"')
+  # NVIDIA SkillSpector (pip package)
+  if python3 -c "import skillspector" 2>/dev/null || command -v skillspector &>/dev/null; then
+    tools=$(echo "$tools" | jq '. + {"skillspector": {"status": "installed", "capabilities": ["security-scan", "risk-scoring"]}}' 2>/dev/null || echo "$tools")
+  fi
 
-    if [[ "$status" == "done" ]]; then
-        echo "$result" | jq -r '.output // ""'
-        local rounds final_score
-        rounds=$(echo "$result" | jq -r '.rounds // 0')
-        final_score=$(echo "$result" | jq -r '.final_score // ""')
-        echo >&2 "✅ 完成 (${rounds} round(s), score: ${final_score:-N/A})"
-    else
-        echo "$result" | jq -r '.error // .status // "unknown error"' >&2
-        exit 1
-    fi
+  # skill-security (our own grep-based scanner — always available)
+  tools=$(echo "$tools" | jq '. + {"skill-security": {"status": "builtin", "capabilities": ["pattern-scan", "baseline"]}}' 2>/dev/null || echo "$tools")
+
+  # caveman-ponytail / format-validator (always active via skill system)
+  tools=$(echo "$tools" | jq '. + {"caveman-ponytail": {"status": "active", "capabilities": ["output-compression", "code-minimalism"]}}' 2>/dev/null || echo "$tools")
+
+  echo "$tools"
 }
 
-# ── blackboard-read ────────────────────────────────────────────────────────
-cmd_blackboard_read() {
-    local key="$1"
-    if [[ -z "$key" ]]; then
-        echo "❌ 缺少 key_prefix" >&2
-        exit 1
-    fi
+# ── Runtime JSON ──────────────────────────────────────────
 
-    curl -s "$BASE/blackboard/$key" | jq .
+generate_runtime() {
+  local tools
+  tools=$(detect_tools)
+  local timestamp
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  cat > "$RUNTIME_FILE" <<RUNTIMEEOF
+{
+  "agentos": "runtime",
+  "version": "0.1.0",
+  "generated_at": "$timestamp",
+  "tools": $tools,
+  "pipeline": {
+    "input": ["headroom", "codebase-memory-mcp"],
+    "context": ["brain", "caveman-ponytail"],
+    "output": ["caveman-ponytail"],
+    "gate": ["skill-security", "format-validator"],
+    "log": ["agentsview"]
+  },
+  "routes": {
+    "code": "codebase-memory-mcp",
+    "research": "opencli",
+    "security": "skill-security",
+    "compression": "caveman-ponytail",
+    "session": "agentsview"
+  }
+}
+RUNTIMEEOF
+  echo "✅ agentos.json 已產生: $RUNTIME_FILE"
 }
 
-# ── blackboard-write ───────────────────────────────────────────────────────
-cmd_blackboard_write() {
-    local key="$1"
-    local data="$2"
-    if [[ -z "$key" || -z "$data" ]]; then
-        echo "❌ 用法: $(basename "$0") blackboard-write <key> <json>" >&2
-        exit 1
-    fi
+# ── Init ──────────────────────────────────────────────────
 
-    curl -s -X POST "$BASE/blackboard/$key" \
-        -H "Content-Type: application/json" \
-        -d "$data" | jq .
+cmd_init() {
+  echo "🔍 偵測本機工具…"
+  local tools
+  tools=$(detect_tools)
+  local count
+  count=$(echo "$tools" | jq 'length')
+  echo "   發現 $count 個工具"
+  generate_runtime
+  echo ""
+  echo "可用工具:"
+  echo "$tools" | jq -r 'to_entries[] | "  \(.key) — \(.value.capabilities | join(", "))"'
+  echo ""
+  echo "Pipeline:"
+  echo "  Input → headroom / codebase-memory-mcp"
+  echo "  Context → brain / caveman-ponytail"
+  echo "  Output → caveman-ponytail"
+  echo "  Gate → skill-security / format-validator"
+  echo "  Log → agentsview"
 }
 
-# ── knowledge-write ────────────────────────────────────────────────────────
-cmd_knowledge_write() {
-    local key="$1"
-    local content="$2"
-    if [[ -z "$key" || -z "$content" ]]; then
-        echo "❌ 用法: $(basename "$0") knowledge-write <key> <content>" >&2
-        exit 1
-    fi
+# ── Tools ─────────────────────────────────────────────────
 
-    local body
-    body=$(printf '{"content": %s}' "$(echo "$content" | jq -Rs '.' )")
-
-    curl -s -X POST "$BASE/knowledge/$(echo "$key" | jq -sRr @uri)" \
-        -H "Content-Type: application/json" \
-        -d "$body" | jq .
+cmd_tools() {
+  if [[ ! -f "$RUNTIME_FILE" ]]; then
+    echo "⚠️ 尚未執行 init，先跑: ./agentos.sh init"
+    exit 1
+  fi
+  cat "$RUNTIME_FILE" | jq '.tools'
 }
 
-# ── knowledge-read ─────────────────────────────────────────────────────────
-cmd_knowledge_read() {
-    local key="$1"
-    if [[ -z "$key" ]]; then
-        echo "❌ 用法: $(basename "$0") knowledge-read <key>" >&2
-        exit 1
-    fi
+# ── Health ────────────────────────────────────────────────
 
-    curl -s "$BASE/knowledge/$(echo "$key" | jq -sRr @uri)" | jq .
-}
-
-# ── knowledge-search ───────────────────────────────────────────────────────
-cmd_knowledge_search() {
-    local query="$1"
-    if [[ -z "$query" ]]; then
-        echo "❌ 用法: $(basename "$0") knowledge-search <query>" >&2
-        exit 1
-    fi
-
-    curl -s "$BASE/knowledge/search?q=$(echo "$query" | jq -sRr @uri)" | jq .
-}
-
-# ── protocol ───────────────────────────────────────────────────────────────
-cmd_protocol() {
-    local subcmd="$1"
-    shift || true
-
-    case "$subcmd" in
-        list)
-            echo "可用協議模板 ($PROTOCOLS_DIR):"
-            for f in "$PROTOCOLS_DIR"/*.md; do
-                local name
-                name=$(basename "$f" .md)
-                local desc
-                desc=$(head -5 "$f" | grep '^# ' | sed 's/^# //')
-                printf "  %-25s %s\n" "$name" "${desc:-未命名}"
-            done
-            ;;
-        show)
-            local name="$1"
-            if [[ -z "$name" ]]; then
-                echo "❌ 用法: $(basename "$0") protocol show <name>" >&2
-                exit 1
-            fi
-            local file="$PROTOCOLS_DIR/$name.md"
-            if [[ ! -f "$file" ]]; then
-                echo "❌ 找不到協議 '$name'。使用 'protocol list' 查看可用協議。" >&2
-                exit 1
-            fi
-            cat "$file"
-            ;;
-        push)
-            local name="$1"
-            if [[ -z "$name" ]]; then
-                echo "❌ 用法: $(basename "$0") protocol push <name>" >&2
-                exit 1
-            fi
-            local file="$PROTOCOLS_DIR/$name.md"
-            if [[ ! -f "$file" ]]; then
-                echo "❌ 找不到協議 '$name'。使用 'protocol list' 查看可用協議。" >&2
-                exit 1
-            fi
-
-            local content
-            content=$(cat "$file")
-            local body
-            body=$(printf '{"content": %s}' "$(echo "$content" | jq -Rs '.' )")
-
-            echo "▶ 推送協議 '$name' 到腦庫..." >&2
-            curl -s -X POST "$BASE/knowledge/protocol/$name" \
-                -H "Content-Type: application/json" \
-                -d "$body" | jq .
-            ;;
-        *)
-            echo "❌ 未知 protocol 子指令: $subcmd" >&2
-            echo "可用: list, show, push" >&2
-            exit 1
-            ;;
-    esac
-}
-
-# ── executors ──────────────────────────────────────────────────────────────
-cmd_executors() {
-    curl -s "$BASE/executors" | jq .
-}
-
-# ── health ─────────────────────────────────────────────────────────────────
 cmd_health() {
-    curl -s "$BASE/health" | jq .
+  echo "🧪 AgentOS Runtime Health"
+  echo ""
+
+  # AgentOS server
+  if curl -sf "$BASE/health" &>/dev/null; then
+    echo "  ✅ AgentOS server — $BASE"
+  else
+    echo "  ⚠️  AgentOS server — 未執行 (agentos.sh up)"
+  fi
+
+  # Tools
+  if [[ -f "$RUNTIME_FILE" ]]; then
+    jq -r '.tools | to_entries[] | "  \(if .value.status == "installed" or .value.status == "active" or .value.status == "builtin" then "✅" else "⚠️" end) \(.key) — \(.value.status)"' "$RUNTIME_FILE"
+  else
+    echo "  ⚠️  尚未執行 init"
+  fi
 }
 
-# ── up / down: 一個指令接上（idempotent）──────────────────────────────────────
-_alive() { curl -s -m 2 "$BASE/health" 2>/dev/null | grep -q '"ok"'; }
+# ── Run ───────────────────────────────────────────────────
 
-cmd_up() {
-    local root log
-    root="$(cd "$SCRIPT_DIR/.." && pwd)"
-    log="${AGENTOS_LOG:-$HOME/.agentos/server.log}"
-    mkdir -p "$(dirname "$log")"
-    if _alive; then echo "● AgentOS 已在跑 ($BASE)"; return 0; fi
-    echo "▶ 啟動 AgentOS server…"
-    ( cd "$root" && nohup .venv/bin/uvicorn api.main:app --port 8000 > "$log" 2>&1 & )
-    for _ in $(seq 1 30); do sleep 0.5; _alive && break; done
-    if _alive; then
-        echo "● 接上了 ($BASE)"
-        echo "  用法：$(basename "$0") run \"任務\" | knowledge-read <k> | executors"
-        echo "  自修復 daemon（選用）：scripts/heartbeat-daemon.sh start"
-    else
-        echo "✗ 起不來，看 log：$log" >&2; exit 1
-    fi
+cmd_run() {
+  if [[ ! -f "$RUNTIME_FILE" ]]; then
+    cmd_init
+  fi
+  # pass through to AgentOS run endpoint
+  exec curl -sf -X POST "$BASE/task/run" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg t "$*" '{task: $t}')"
 }
 
-cmd_down() {
-    lsof -ti:8000 2>/dev/null | xargs kill -9 2>/dev/null && echo "■ AgentOS 已停" || echo "沒在跑"
+# ── Brain ─────────────────────────────────────────────────
+
+cmd_brain() {
+  local action="${1:-}"; shift || true
+  case "$action" in
+    read)    curl -sf "$BASE/knowledge/${1:-}";;
+    write)   curl -sf -X POST "$BASE/knowledge/${1:-}" -H 'Content-Type: application/json' -d "{\"content\": \"${2:-}\"}";;
+    search)  curl -sf "$BASE/knowledge/search?q=${1:-}";;
+    *)       echo "用法: brain read|write|search"; exit 1;;
+  esac
 }
 
-# ── main dispatch ──────────────────────────────────────────────────────────
-main() {
-    if [[ $# -eq 0 ]]; then
-        usage
-    fi
+# ── Bridge 管理 ──────────────────────────────────────────
 
-    local cmd="$1"
-    shift
+BRIDGE_SCRIPT="$HOME/Developer/neuralis/scripts/agentos-aris-bridge.py"
+BRIDGE_PID_FILE="/tmp/agentos-aris-bridge.pid"
 
-    case "$cmd" in
-        --help|-h) usage ;;
-        run) cmd_run "$@" ;;
-        blackboard-read) cmd_blackboard_read "$@" ;;
-        blackboard-write) cmd_blackboard_write "$@" ;;
-        knowledge-write) cmd_knowledge_write "$@" ;;
-        knowledge-read) cmd_knowledge_read "$@" ;;
-        knowledge-search) cmd_knowledge_search "$@" ;;
-        protocol) cmd_protocol "$@" ;;
-        executors) cmd_executors "$@" ;;
-        health) cmd_health "$@" ;;
-        up) cmd_up "$@" ;;
-        down) cmd_down "$@" ;;
-        *)
-            echo "❌ 未知指令: $cmd" >&2
-            echo "使用 --help 查看可用指令。" >&2
-            exit 1
-            ;;
-    esac
+cmd_bridge() {
+  local action="${1:-}"; shift || true
+  case "$action" in
+    up)
+      if [ -f "$BRIDGE_PID_FILE" ] && kill -0 "$(cat "$BRIDGE_PID_FILE")" 2>/dev/null; then
+        echo "✅ agentos-aris-bridge 已在運行 (PID $(cat "$BRIDGE_PID_FILE"))"
+        return 0
+      fi
+      python3 "$BRIDGE_SCRIPT" --daemon
+      for i in 1 2 3 4 5; do
+        sleep 1
+        local pid
+        pid=$(ps aux | grep "agentos-aris-bridge" | grep -v grep | awk '{print $2}' | head -1)
+        if [ -n "$pid" ]; then
+          echo "$pid" > "$BRIDGE_PID_FILE"
+          echo "✅ agentos-aris-bridge 已啟動 (PID $pid)"
+          echo "   日誌: /tmp/agentos-aris-bridge.log"
+          return 0
+        fi
+      done
+      echo "⚠️  bridge 啟動逾時，請檢查日誌";;
+    down)
+      if [ -f "$BRIDGE_PID_FILE" ]; then
+        local pid
+        pid=$(cat "$BRIDGE_PID_FILE")
+        kill "$pid" 2>/dev/null && echo "✅ bridge 已停止 (PID $pid)" || echo "⚠️  PID $pid 不存在"
+        rm -f "$BRIDGE_PID_FILE"
+      else
+        local pid
+        pid=$(ps aux | grep "agentos-aris-bridge" | grep -v grep | awk '{print $2}' | head -1)
+        if [ -n "$pid" ]; then
+          kill "$pid" 2>/dev/null && echo "✅ bridge 已停止 (PID $pid)"
+        else
+          echo "⚠️  bridge 未在運行"
+        fi
+      fi;;
+    status)
+      if [ -f "$BRIDGE_PID_FILE" ] && kill -0 "$(cat "$BRIDGE_PID_FILE")" 2>/dev/null; then
+        local pid
+        pid=$(cat "$BRIDGE_PID_FILE")
+        local uptime
+        uptime=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
+        echo "✅ agentos-aris-bridge 運行中"
+        echo "   PID: $pid"
+        echo "   運行時間: ${uptime:-?}"
+        echo "   日誌: /tmp/agentos-aris-bridge.log"
+        echo "   通道: /tmp/aris-scream-channel.jsonl"
+      else
+        echo "⚠️  agentos-aris-bridge 未運行"
+        echo "   啟動: agentos.sh bridge up"
+      fi;;
+    log)
+      tail -20 "$LOG_FILE" 2>/dev/null || echo "日誌檔案不存在";;
+    restart)
+      cmd_bridge down
+      sleep 1
+      cmd_bridge up;;
+    *)
+      echo "用法: bridge up|down|status|log|restart"; exit 1;;
+  esac
 }
 
-main "$@"
+# ── Main dispatch ─────────────────────────────────────────
+
+CMD="${1:-}"; shift || true
+case "$CMD" in
+  init)           cmd_init "$@";;
+  tools)          cmd_tools "$@";;
+  health)         cmd_health "$@";;
+  run)            cmd_run "$@";;
+  brain)          cmd_brain "$@";;
+  bridge)         cmd_bridge "$@";;
+  up)        if curl -sf localhost:8000/health &>/dev/null; then
+               echo "✅ AgentOS already running on :8000"
+             else
+               cd "$SCRIPT_DIR/.." && bash dev.sh &
+               sleep 2
+               curl -sf localhost:8000/health &>/dev/null && echo "✅ AgentOS started" || echo "⚠️ AgentOS didn't start — check dev.sh"
+             fi;;
+  down)      lsof -ti:8000 | xargs kill -9 2>/dev/null && echo "stopped" || echo "nothing on :8000";;
+  --help|-h) usage;;
+  "")        usage;;
+  *)         echo "未知指令: $CMD"; usage; exit 1;;
+esac

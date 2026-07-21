@@ -1,0 +1,103 @@
+{
+  "agentos": "runtime",
+  "version": "0.3.0",
+  "generated_at": "2026-07-21T02:27:00Z",
+  "tools": {
+    "codebase-memory-mcp": {
+      "status": "installed",
+      "version": "codebase-memory-mcp 0.8.1",
+      "capabilities": ["code-graph", "search", "architecture", "trace"]
+    },
+    "opencli": {
+      "status": "installed",
+      "version": "1.8.4",
+      "capabilities": ["browser", "100+-sites"]
+    },
+    "agentsview": {
+      "status": "installed",
+      "version": "agentsview v0.34.5",
+      "capabilities": ["session-analytics", "token-tracking"]
+    },
+    "skill-security": {
+      "status": "builtin",
+      "capabilities": ["pattern-scan", "baseline"]
+    },
+    "caveman-ponytail": {
+      "status": "active",
+      "capabilities": ["output-compression", "code-minimalism"]
+    },
+    "openmontage": {
+      "status": "installed",
+      "path": "~/agent-sandbox/OpenMontage/",
+      "capabilities": ["video-pipeline", "documentary-montage", "CLIP-retrieval"]
+    },
+    "anysearch": {
+      "status": "installed",
+      "capabilities": ["web-search", "vertical-search", "page-extraction", "batch-search"]
+    },
+    "addyosmani-engineer": {
+      "status": "installed",
+      "capabilities": ["spec", "plan", "build", "test", "review", "ship"]
+    },
+    "sports-skills": {
+      "status": "installed",
+      "capabilities": ["football", "nba", "nfl", "f1", "prediction-markets"]
+    },
+    "agentos-aris-bridge": {
+      "status": "installed",
+      "path": "~/Developer/neuralis/scripts/agentos-aris-bridge.py",
+      "capabilities": ["aris-channel", "task-routing", "pipeline", "gate", "brain-context"]
+    }
+  },
+  "pipeline": {
+    "input": ["headroom", "codebase-memory-mcp", "aris-channel"],
+    "context": ["brain", "caveman-ponytail"],
+    "execute": ["agentos-aris-bridge"],
+    "output": ["caveman-ponytail"],
+    "gate": ["skill-security", "format-validator"],
+    "log": ["agentsview"]
+  },
+  "routes": {
+    "code": "codebase-memory-mcp",
+    "research": "anysearch",
+    "browser-research": "opencli",
+    "video": "openmontage",
+    "html-video": "html-video",
+    "motion": "text-to-lottie | pixel2motion",
+    "social-scrape": "douyin-downloader | xhs-downloader | twscrape",
+    "sports": "football-data | nba-data | nfl-data | fastf1",
+    "engineer": "addyosmani-agent-skills (spec→plan→build→test→review→ship)",
+    "design": "impeccable",
+    "plan": "planning-with-files | planning-and-task-breakdown",
+    "security": "skill-security",
+    "compression": "caveman-ponytail",
+    "session": "agentsview",
+    "branding-template": "template-batch",
+    "troubleshoot": "troubleshooter",
+    "spec-mgmt": "docs/specs/ (project-level spec management)",
+    "read": "Read tool (file reading via bridge)",
+    "write": "Write tool (file writing via bridge)",
+    "bash": "Bash tool (shell execution via bridge)",
+    "search-web": "WebSearch / anysearch (via bridge)",
+    "compile": "build / compile (shell via bridge)",
+    "aris-status": "aris-status.py (health check via bridge)",
+    "aris-channel": "agentos-aris-bridge",
+    "aris-task": "agentos-aris-bridge",
+    "aris-request": "agentos-aris-bridge"
+  },
+  "aris_bridge": {
+    "channel": "/tmp/aris-scream-channel.jsonl",
+    "processed_ids": "/tmp/aris-scream-processed-ids.json",
+    "lock": "/tmp/aris-scream-task-lock",
+    "log": "/tmp/agentos-aris-bridge.log",
+    "brain_dir": "~/.scream-code/agentos-brain/",
+    "poll_interval": 1.0,
+    "pipeline_stages": [
+      "route-classification",
+      "brain-context-lookup",
+      "execute",
+      "gate",
+      "log"
+    ]
+  }
+}

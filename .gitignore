@@ -8,3 +8,7 @@ __pycache__/
 super-engine/node_modules/
 super-engine/package-lock.json
 super-engine/brave-profile/
+mcp_server/audit.log
+mcp_server/snapshots/
+mcp_server/**/*.pyc
+mcp_server/__pycache__/

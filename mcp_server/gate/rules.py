@@ -5,8 +5,11 @@
 
 from pathlib import Path
 
+# 必須與 sandbox/executor.py 的 ALLOWED_OPS 一致
+# （test_allowed_ops_consistency 斷言兩者相等）
 ALLOWED_OPS = frozenset({
     "list_directory", "read_file", "get_cwd",
+    "write_file",
 })
 
 _SHELL_METACHARS = frozenset(";&|`$<>()[]{}!\\'\"\n\t ")

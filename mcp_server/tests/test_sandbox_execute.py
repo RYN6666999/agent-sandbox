@@ -201,6 +201,121 @@ class TestSecurity:
         assert r["status"] == "blocked"
 
 
+# ═══════════════ C2. Write File ═══════════════
+
+class TestWriteFile:
+    """write_file：寫入前必 checkpoint，失敗必回退。
+
+    這組是 checkpoint / rollback 路徑第一次被端到端執行 — 在只有唯讀操作的
+    時期，兩個模組雖有單元測試但 execute() 走不到。
+    """
+
+    @staticmethod
+    def _exec(**params):
+        """直接呼叫 executor（繞過 MCP 子行程，測得到 checkpoint 內部狀態）。"""
+        import tempfile as _tf
+        from mcp_server.config import Config
+        from mcp_server.sandbox.workspace import WorkspaceHandle
+        from mcp_server.sandbox.executor import execute
+        os.environ["AGENTOS_WORK_DIR"] = str(WORK_DIR)
+        os.environ["AGENTOS_SNAPSHOT_DIR"] = str(SNAP_DIR)
+        os.environ["AGENTOS_AUDIT_PATH"] = str(TEST_DIR / "audit.log")
+        cfg = Config()
+        wh = WorkspaceHandle(cfg.work_dir)
+        try:
+            return execute(operation=params.pop("operation"), wh=wh, config=cfg,
+                           params=params, session_id="t"), cfg
+        finally:
+            wh.close()
+
+    def test_create_new_file(self):
+        r = _mcp_call(operation="write_file", path="new.txt", content="hello")
+        assert r["status"] == "ok", r["stderr"]
+        assert (WORK_DIR / "new.txt").read_text() == "hello"
+        assert r["checkpoint_id"] is not None
+
+    def test_overwrite_then_rollback_restores_original(self):
+        (WORK_DIR / "exist.txt").write_text("ORIGINAL")
+        r, cfg = self._exec(operation="write_file", path="exist.txt", content="REPLACED")
+        assert r["status"] == "ok"
+        assert (WORK_DIR / "exist.txt").read_text() == "REPLACED"
+
+        from mcp_server.sandbox.rollback import manual_rollback
+        rb = manual_rollback(r["checkpoint_id"], cfg.snapshot_dir)
+        assert rb["status"] == "ok", rb
+        assert (WORK_DIR / "exist.txt").read_text() == "ORIGINAL"
+
+    def test_rollback_of_new_file_deletes_it(self):
+        r, cfg = self._exec(operation="write_file", path="fresh.txt", content="x")
+        assert r["status"] == "ok"
+        from mcp_server.sandbox.rollback import manual_rollback
+        rb = manual_rollback(r["checkpoint_id"], cfg.snapshot_dir)
+        assert rb["status"] == "ok"
+        assert not (WORK_DIR / "fresh.txt").exists()
+
+    def test_symlink_target_blocked_without_checkpoint(self):
+        """symlink 必須在 checkpoint 之前擋掉。
+
+        Checkpoint 用一般路徑操作，_sha256() 會跟隨 symlink 讀到 workspace
+        外的檔案。順序錯了就會對 workspace 外的目標建快照。
+        """
+        outside = TEST_DIR / "OUTSIDE.txt"
+        outside.write_text("外部內容")
+        os.symlink(str(outside), WORK_DIR / "link.txt")
+        SNAP_DIR.mkdir(parents=True, exist_ok=True)
+        before = len(list(SNAP_DIR.glob("*.json")))
+
+        r = _mcp_call(operation="write_file", path="link.txt", content="PWNED")
+        assert r["status"] == "blocked"
+        assert "symlink" in r["stderr"]
+        assert outside.read_text() == "外部內容"
+        assert len(list(SNAP_DIR.glob("*.json"))) == before, "不該為 symlink 建 checkpoint"
+
+    @pytest.mark.parametrize("bad_path", [".env", "secret.txt", "id_rsa", "my.key"])
+    def test_forever_denied_paths_not_writable(self, bad_path):
+        """快照不了的路徑就不准寫 — checkpoint 的 deny 清單即寫入保護。"""
+        r = _mcp_call(operation="write_file", path=bad_path, content="x")
+        assert r["status"] == "blocked"
+        assert "forever_denied" in r["stderr"]
+        assert not (WORK_DIR / bad_path).exists()
+
+    def test_absolute_path_blocked(self):
+        assert _mcp_call(operation="write_file", path="/etc/x", content="x")["status"] == "blocked"
+
+    def test_parent_escape_blocked(self):
+        assert _mcp_call(operation="write_file", path="../esc.txt", content="x")["status"] == "blocked"
+        assert not (TEST_DIR / "esc.txt").exists()
+
+    def test_directory_target_blocked(self):
+        r = _mcp_call(operation="write_file", path="sub", content="x")
+        assert r["status"] == "blocked"
+
+    def test_missing_path_blocked(self):
+        r = _mcp_call(operation="write_file", content="x")
+        assert r["status"] == "blocked"
+        assert "path required" in r["stderr"]
+
+    def test_oversize_content_blocked_and_rolled_back(self):
+        from mcp_server.sandbox.executor import MAX_WRITE_BYTES
+        r = _mcp_call(operation="write_file", path="big.txt",
+                      content="A" * (MAX_WRITE_BYTES + 1))
+        assert r["status"] == "blocked"
+        assert r["rollback_applied"] is True
+        assert not (WORK_DIR / "big.txt").exists()
+
+    def test_atomic_write_leaves_no_temp_file(self):
+        r = _mcp_call(operation="write_file", path="atomic.txt", content="done")
+        assert r["status"] == "ok"
+        leftovers = [p.name for p in WORK_DIR.iterdir() if ".tmp." in p.name]
+        assert leftovers == [], leftovers
+
+    def test_readonly_ops_still_produce_no_checkpoint(self):
+        r = _mcp_call(operation="read_file", path="test.txt")
+        assert r["status"] == "ok"
+        assert r["checkpoint_id"] is None
+        assert r["rollback_applied"] is False
+
+
 # ═══════════════ D. Checkpoint ═══════════════
 
 class TestCheckpoint:
@@ -287,7 +402,9 @@ class TestSchema:
         schema = tool["inputSchema"]
         assert schema.get("additionalProperties") is False, schema
         # flat API 不得被改成巢狀 model 參數
-        assert set(schema["properties"]) == {"operation", "path", "session_id"}, schema
+        assert set(schema["properties"]) == {
+            "operation", "path", "content", "session_id"
+        }, schema
         assert schema["required"] == ["operation"], schema
 
     def test_unknown_param_rejected(self):

@@ -274,14 +274,17 @@ CREATE TABLE IF NOT EXISTS ontology_health_history (
 | `sandbox_rollback`   | `checkpoint_id: str`                                  | 手動回退到指定 checkpoint。回傳 `{status, restored_files}`                                                |
 
 
-#### `sandbox_execute` 契約（v0.3 對齊實作，取代 v0.2 的 command API）
+#### `sandbox_execute` 契約（v0.4；v0.3 取代 v0.2 的 command API，v0.4 加入寫入）
 
 ```json
-{"operation": "get_cwd", "path": "", "session_id": "default"}
+{"operation": "write_file", "path": "notes.txt", "content": "…", "session_id": "default"}
 ```
 
-- `operation` 限白名單三選一：`list_directory` / `read_file` / `get_cwd`
+- `operation` 限白名單：
+  - 唯讀 — `list_directory` / `read_file` / `get_cwd`
+  - 寫入 — `write_file`
 - `path` 為 workspace 相對路徑，型別是 `str`（**不接受 `null`**），`get_cwd` 傳 `""`
+- `content` 只有 `write_file` 使用，上限 1MB，其餘操作忽略
 - inputSchema 是 `additionalProperties: false`，**多送任何欄位一律被拒**
 - 沒有 `command`、沒有 `timeout`、沒有 `rollback_on_fail`
 
@@ -295,10 +298,24 @@ CREATE TABLE IF NOT EXISTS ontology_health_history (
 
 **關鍵設計**：sandbox 只管理檔案狀態（file hash + tar.gz），不管理程序狀態。AgentOS 是管家不是執行層。
 
-**現況限制**：白名單三個操作都是唯讀，因此 `sandbox_execute` 路徑上
-**不會產生 checkpoint**，回傳的 `checkpoint_id` 恆為 `null`、`rollback_applied`
-恆為 `false`。`checkpoint.py` / `rollback.py` 模組已實作且有測試覆蓋，但目前
-**無法經由 `sandbox_execute` 觸達**。要啟用需先引入會修改檔案的操作。
+#### write_file 的安全順序（v0.4，順序不可調換）
+
+1. **fd-relative `lstat` 檢查目標** — 必須不存在，或是 regular file。
+   symlink 一律 `blocked`。
+   **這步必須在 checkpoint 之前**：`Checkpoint` 用一般路徑操作，其 `_sha256()`
+   會跟隨 symlink 讀到 workspace 外的檔案。順序錯了就會對 workspace 外的目標
+   建快照。（archive 本身存的是 symlink 條目而非內容，所以不是內容外洩，
+   但仍違反 workspace confinement。）
+2. **建立 checkpoint**（`allow_paths=[path]`）。`Checkpoint` 的 forever-deny
+   清單（`.env` / `secret*` / `token*` / `*.key` / `*.pem` / `id_rsa` …）
+   在這裡等於**寫入保護：快照不了的路徑就不准寫**。
+3. **原子寫入** — 同目錄暫存檔（`O_CREAT|O_EXCL|O_NOFOLLOW`，0600）→ `fsync`
+   → `os.rename(src_dir_fd, dst_dir_fd)`。原檔在 rename 成功前不被截斷；
+   寫到一半失敗不會留下半截檔案，也不留暫存檔。
+4. **失敗即回退** — 任何例外都呼叫 `auto_rollback`，並把實際結果誠實回報在
+   `rollback_applied`（回退本身失敗時，錯誤訊息會附加 rollback 的失敗原因）。
+
+唯讀操作維持不建 checkpoint，`checkpoint_id` 為 `null`。
 
 ### 4.3 Loop（2 tools） — v0.3
 
@@ -332,17 +349,20 @@ checkpoint(session_id):
   3. 記錄受保護的環境變數
   4. 回傳 checkpoint_id (UUID)
 
-執行流程（v0.3 對齊實作，取代 v0.2 的 subprocess 版本）:
+執行流程（v0.4；取代 v0.2 的 subprocess 版本）:
 
-execute(operation, path, session_id):
+execute(operation, path, content, session_id):
   1. if operation not in ALLOWED_OPS: return {status: "blocked"}
-  2. 驗證 path：非絕對路徑、非 "-" 開頭、無 shell metachar、分割成 parts
-  3. dup_root_fd = workspace.dup_fd()        # 含 workspace identity 驗證
-  4. 以 fd-relative + O_NOFOLLOW 逐段開啟，執行唯讀操作
-  5. 寫 audit log，return {status, stdout, stderr,
-                           checkpoint_id: null, rollback_applied: false}
+  2. 寫入操作缺 path 即 blocked（不可落到「無 path」分支靜默成功）
+  3. 驗證 path：非絕對路徑、非 "-" 開頭、無 shell metachar、無 . / ..
+  4. dup_root_fd = workspace.dup_fd()        # 含 workspace identity 驗證
+  5a. 唯讀操作：fd-relative + O_NOFOLLOW 開啟並讀取
+      → checkpoint_id: null, rollback_applied: false
+  5b. 寫入操作：lstat 檢查（擋 symlink）→ checkpoint → 原子寫入
+      → 任一步失敗即 auto_rollback，誠實回報 rollback_applied
+  6. 寫 audit log，return {status, stdout, stderr,
+                           checkpoint_id, rollback_applied}
 
-  ※ 唯讀，不建 checkpoint、不會 rollback。步驟 1-3 任一失敗即 blocked。
   ※ 沒有 subprocess，沒有 timeout 參數 — 不執行外部指令。
 
 rollback(checkpoint_id):
@@ -529,13 +549,22 @@ v0.2 的三條有一條在目前設計下**測不了**：第 2 條要求「跑�
 3. **路徑攔截**：絕對路徑、`../` 逃逸、symlink、`-` 開頭、shell metachar
    全部回 `blocked`，audit log 有紀錄
 
-**延後到「有寫入操作」時才驗收**（模組已實作且單獨測過，但 execute 觸達不到）：
+4. **寫入 + 回退**（v0.4 新增，原「延後驗收」項目已完成）：
+   - `write_file` 覆寫既有檔 → `manual_rollback` 還原成原內容
+   - `write_file` 新建檔 → rollback 等於刪除該檔
+   - symlink 目標 `blocked`，且**不建 checkpoint**
+   - forever-deny 路徑（`.env` / `secret*` / `id_rsa` / `*.key`）`blocked` 且未建立
+   - 超過 1MB `blocked` 且 `rollback_applied: true`
+   - 寫入後目錄不殘留 `.tmp.` 暫存檔
 
-- checkpoint 自動建立
-- 失敗自動 rollback
+**v0.4 修復**：`rollback.py` 的 `auto_rollback()` 先前從未被執行過，有兩個
+會讓它必然失敗的缺陷 —— `Checkpoint(...)` 少傳必要的 `allow_paths`，以及把
+`restore()` 回傳的 dict 當成 int。修好之後回退路徑才第一次真的跑通。
 
-三條過了 = 契約層與路徑層的安全模型立住。**但要注意這證明的是
-「唯讀沙盒安全」，不是「可回退的執行沙盒安全」**——後者尚未被端到端驗證。
+四條過了 = 契約層、路徑層、**以及可回退寫入**的安全模型都立住。
+
+**仍未涵蓋**：刪除與建目錄操作（`delete_file` / `create_directory`）尚未實作；
+寫入路徑的 TOCTOU 壓力測試尚未撰寫（現有壓力測試只涵蓋 `read_file`）。
 
 ### 後續版本規劃
 
@@ -558,6 +587,7 @@ v0.2 的三條有一條在目前設計下**測不了**：第 2 條要求「跑�
 | 2026-07-20 | v0.1 初稿（三案共識整合，暫名 `hulk-nick-fury-white-tiger.md`）                                          |
 | 2026-07-21 | v0.2 修訂：檔名正式化、角色映射入文、Loop 定案拉式、`agentos.json` 收斂為 config-only、MVP 收斂至 `sandbox_execute` 單工具 |
 | 2026-07-22 | v0.3 **對齊實作**：文件移入 `docs/` 納版控；目錄更正為 `mcp_server/`（附遮蔽 SDK 的實測理由）；§4.2 `sandbox_execute` 改為唯讀白名單契約（`operation`/`path`/`session_id`，`additionalProperties:false`）；§5 演算法改為 fd-relative 唯讀流程；§9 驗收標準改寫，明列 checkpoint/rollback 目前觸達不到；加註「不可用 returncode 判定呼叫成功」 |
+| 2026-07-22 | v0.4 **加入寫入操作**：新增 `write_file`（契約多一個 `content`，上限 1MB）；§4.2 補寫入安全順序（lstat 擋 symlink → checkpoint → 原子 temp+rename → 失敗回退），說明為何 symlink 檢查必須早於 checkpoint；§5 流程分唯讀/寫入兩路；§9 新增第 4 條驗收，原「延後驗收」的 checkpoint/rollback 已完成。修復 `rollback.py` 兩個從未被執行過的缺陷。仍未做：`delete_file` / `create_directory`、寫入路徑的 TOCTOU 壓力測試 |
 
 
 &nbsp;

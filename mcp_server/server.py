@@ -31,6 +31,7 @@ class SandboxExecuteArgs(BaseModel):
 
     operation: str
     path: str = ""
+    content: str = ""
     session_id: str = "default"
 
 mcp = FastMCP(
@@ -46,27 +47,35 @@ _config: Config | None = None
 def sandbox_execute(
     operation: str,
     path: str = "",
+    content: str = "",
     session_id: str = "default",
 ) -> dict:
     """在沙盒中執行白名單操作（fd-relative safe open）。
 
-    支援的操作：
+    唯讀操作：
     - list_directory(path) — 列出目錄內容
     - read_file(path) — 讀取檔案內容（O_NOFOLLOW + fd-relative）
     - get_cwd() — 回傳工作目錄路徑
 
+    寫入操作（寫入前自動 checkpoint，失敗自動回退）：
+    - write_file(path, content) — 原子寫入（暫存檔 + rename），上限 1MB
+
     Args:
         operation: 白名單操作名稱
         path: 操作目標相對路徑
+        content: write_file 的內容；其他操作忽略
         session_id: 工作階段 ID
 
     Returns:
         {"status": "ok"|"blocked"|"error"|"not_found",
-         "stdout": str, "stderr": str, ...}
+         "stdout": str, "stderr": str,
+         "checkpoint_id": str|None, "rollback_applied": bool}
     """
     # 型別/取值再驗一次。未知參數已在 arg model 層擋掉，到不了這裡。
     try:
-        SandboxExecuteArgs(operation=operation, path=path, session_id=session_id)
+        SandboxExecuteArgs(
+            operation=operation, path=path, content=content, session_id=session_id
+        )
     except ValidationError as e:
         return {"status": "blocked", "stdout": "", "stderr": f"invalid arguments: {e}"}
 
@@ -76,7 +85,7 @@ def sandbox_execute(
         operation=operation,
         wh=_wh,
         config=_config,
-        params={"path": path},
+        params={"path": path, "content": content},
         session_id=session_id,
     )
 

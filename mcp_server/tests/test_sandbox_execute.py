@@ -316,6 +316,65 @@ class TestWriteFile:
         assert r["rollback_applied"] is False
 
 
+# ═══════════════ C3. Delete File ═══════════════
+
+class TestDeleteFile:
+    """delete_file：與 write 同一套安全順序，rollback 走「還原被刪的檔」分支。
+
+    這組讓 restore() 的「從 archive 解壓還原已消失的檔」分支第一次經由
+    execute() 端到端跑過（先前只有 checkpoint 層的 test_restore_deleted）。
+    """
+
+    def test_delete_then_rollback_restores(self):
+        (WORK_DIR / "gone.txt").write_text("IMPORTANT")
+        r, cfg = TestWriteFile._exec(operation="delete_file", path="gone.txt")
+        assert r["status"] == "ok", r["stderr"]
+        assert not (WORK_DIR / "gone.txt").exists()
+
+        from mcp_server.sandbox.rollback import manual_rollback
+        rb = manual_rollback(r["checkpoint_id"], cfg.snapshot_dir)
+        assert rb["status"] == "ok", rb
+        assert (WORK_DIR / "gone.txt").read_text() == "IMPORTANT"
+
+    def test_delete_nonexistent_is_not_found(self):
+        r = _mcp_call(operation="delete_file", path="nope.txt")
+        assert r["status"] == "not_found"
+
+    def test_delete_symlink_blocked(self):
+        outside = TEST_DIR / "del_outside.txt"
+        outside.write_text("外部")
+        os.symlink(str(outside), WORK_DIR / "link.txt")
+        r = _mcp_call(operation="delete_file", path="link.txt")
+        assert r["status"] == "blocked"
+        assert "symlink" in r["stderr"]
+        assert outside.exists(), "symlink 目標不該被刪"
+
+    def test_delete_directory_blocked(self):
+        r = _mcp_call(operation="delete_file", path="sub")
+        assert r["status"] == "blocked"
+        assert (WORK_DIR / "sub").is_dir()
+
+    @pytest.mark.parametrize("bad_path", [".env", "secret.txt", "id_rsa", "my.key"])
+    def test_delete_forever_denied_blocked(self, bad_path):
+        """快照不了的路徑就不准刪 — 刪了無法回退。"""
+        (WORK_DIR / bad_path).write_text("x")
+        r = _mcp_call(operation="delete_file", path=bad_path)
+        assert r["status"] == "blocked"
+        assert "forever_denied" in r["stderr"]
+        assert (WORK_DIR / bad_path).exists(), "forever-deny 檔不該被刪"
+
+    def test_delete_absolute_path_blocked(self):
+        assert _mcp_call(operation="delete_file", path="/etc/passwd")["status"] == "blocked"
+
+    def test_delete_parent_escape_blocked(self):
+        assert _mcp_call(operation="delete_file", path="../x")["status"] == "blocked"
+
+    def test_delete_missing_path_blocked(self):
+        r = _mcp_call(operation="delete_file", path="")
+        assert r["status"] == "blocked"
+        assert "path required" in r["stderr"]
+
+
 # ═══════════════ D. Checkpoint ═══════════════
 
 class TestCheckpoint:

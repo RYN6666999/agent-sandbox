@@ -57,8 +57,9 @@ def sandbox_execute(
     - read_file(path) — 讀取檔案內容（O_NOFOLLOW + fd-relative）
     - get_cwd() — 回傳工作目錄路徑
 
-    寫入操作（寫入前自動 checkpoint，失敗自動回退）：
+    寫入操作（動作前自動 checkpoint，失敗自動回退）：
     - write_file(path, content) — 原子寫入（暫存檔 + rename），上限 1MB
+    - delete_file(path) — 刪除 regular file，目標須存在
 
     Args:
         operation: 白名單操作名稱

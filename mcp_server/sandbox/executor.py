@@ -5,8 +5,8 @@
 唯讀操作（不產 checkpoint）：
 - list_directory, read_file, get_cwd
 
-寫入操作（寫入前必產 checkpoint，失敗自動 rollback）：
-- write_file
+寫入操作（動作前必產 checkpoint，失敗自動 rollback）：
+- write_file, delete_file
 """
 
 import os
@@ -40,7 +40,7 @@ READONLY_OPS = frozenset({
 })
 
 WRITE_OPS = frozenset({
-    "write_file",
+    "write_file", "delete_file",
 })
 
 ALLOWED_OPS = READONLY_OPS | WRITE_OPS
@@ -242,6 +242,23 @@ def _execute_write_file(dup_root_fd: int, path_parts: list[str], content: str) -
                     pass
 
 
+def _execute_delete_file(dup_root_fd: int, path_parts: list[str]) -> None:
+    """fd-relative 刪除檔案。unlink 不跟隨 symlink（刪的是 entry 本身）。"""
+    dir_parts = path_parts[:-1]
+    filename = path_parts[-1]
+
+    parent_fd, opened_fds = _fd_walk(dup_root_fd, dir_parts)
+    try:
+        os.unlink(filename, dir_fd=parent_fd)
+    finally:
+        for fd in opened_fds:
+            if fd != dup_root_fd:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+
 def _classify_error(e: Exception) -> tuple[str, str]:
     """把例外歸類成 result status。與唯讀分支的既有慣例一致。"""
     if isinstance(e, FileNotFoundError):
@@ -322,6 +339,73 @@ def _do_write_file(
     result["stdout"] = f"wrote {written} bytes to {op_path}"
 
 
+def _do_delete_file(
+    dup_root_fd: int,
+    path_parts: list[str],
+    op_path: str,
+    config: Config,
+    result: dict,
+) -> None:
+    """delete_file 完整流程：存在性 + symlink 檢查 → checkpoint → unlink → 失敗回退。
+
+    與 write_file 同一套安全順序，兩點不同：
+    - 目標必須「已存在」（不存在回 not_found）— 刪不存在的東西不是靜默成功。
+    - checkpoint 拍下待刪的檔，rollback 走 restore() 的「從 archive 解壓還原
+      已消失的檔」分支。forever-deny 路徑快照不了 → 不准刪（無法回退）。
+    """
+    # 1. 目標必須存在、是 regular file、非 symlink
+    try:
+        st = _stat_target(dup_root_fd, path_parts)
+    except Exception as e:
+        result["status"], result["stderr"] = _classify_error(e)
+        if result["status"] == "not_found":
+            result["stderr"] = f"path not found: {op_path}"
+        return
+
+    if st is None:
+        result["status"] = "not_found"
+        result["stderr"] = f"path not found: {op_path}"
+        return
+    if stat.S_ISLNK(st.st_mode):
+        result["status"] = "blocked"
+        result["stderr"] = "target is a symlink"
+        return
+    if not stat.S_ISREG(st.st_mode):
+        result["status"] = "blocked"
+        result["stderr"] = "target is not a regular file"
+        return
+
+    # 2. checkpoint（拍下待刪的檔）
+    try:
+        ckpt = Checkpoint.create(
+            config.work_dir, config.snapshot_dir, allow_paths=[op_path]
+        )
+    except ValueError as e:
+        result["status"] = "blocked"
+        result["stderr"] = f"checkpoint refused: {e}"
+        return
+    except OSError as e:
+        result["status"] = "error"
+        result["stderr"] = f"checkpoint failed: {e}"
+        return
+
+    result["checkpoint_id"] = ckpt.id
+
+    # 3. 刪除，失敗即回退
+    try:
+        _execute_delete_file(dup_root_fd, path_parts)
+    except Exception as e:
+        rb = auto_rollback(ckpt.id, config.snapshot_dir)
+        result["rollback_applied"] = rb.get("status") == "ok"
+        result["status"], result["stderr"] = _classify_error(e)
+        if not result["rollback_applied"]:
+            result["stderr"] += f" | rollback failed: {rb.get('error')}"
+        return
+
+    result["status"] = "ok"
+    result["stdout"] = f"deleted {op_path}"
+
+
 # ── 主執行函式 ──────────────────────────────────────────────
 
 def execute(
@@ -365,7 +449,7 @@ def execute(
 
     # 路徑驗證
     path_parts = []
-    if op_path and operation in ("read_file", "list_directory", "write_file"):
+    if op_path and operation in ("read_file", "list_directory", "write_file", "delete_file"):
         try:
             path_parts = _validate_user_path(op_path)
         except ValueError as e:
@@ -437,6 +521,9 @@ def execute(
                 dup_root_fd, path_parts, op_path,
                 params.get("content", ""), config, result,
             )
+
+        elif operation == "delete_file":
+            _do_delete_file(dup_root_fd, path_parts, op_path, config, result)
 
     finally:
         try:

@@ -9,7 +9,7 @@ from pathlib import Path
 # （test_allowed_ops_consistency 斷言兩者相等）
 ALLOWED_OPS = frozenset({
     "list_directory", "read_file", "get_cwd",
-    "write_file",
+    "write_file", "delete_file",
 })
 
 _SHELL_METACHARS = frozenset(";&|`$<>()[]{}!\\'\"\n\t ")

@@ -282,9 +282,10 @@ CREATE TABLE IF NOT EXISTS ontology_health_history (
 
 - `operation` 限白名單：
   - 唯讀 — `list_directory` / `read_file` / `get_cwd`
-  - 寫入 — `write_file`
+  - 寫入 — `write_file` / `delete_file`
 - `path` 為 workspace 相對路徑，型別是 `str`（**不接受 `null`**），`get_cwd` 傳 `""`
 - `content` 只有 `write_file` 使用，上限 1MB，其餘操作忽略
+- `delete_file` 目標必須「已存在」的 regular file（不存在回 `not_found`）
 - inputSchema 是 `additionalProperties: false`，**多送任何欄位一律被拒**
 - 沒有 `command`、沒有 `timeout`、沒有 `rollback_on_fail`
 
@@ -575,7 +576,15 @@ confinement 洩漏）。修法：`_sha256` 改用 `os.open(..., O_NOFOLLOW)`，�
 `create()` 加 `is_symlink()` 前置檢查。O_NOFOLLOW 是原子關窗點——即使 symlink
 在檢查後才換上，開檔也會 ELOOP，checkpoint 乾淨失敗而非讀到外部。修後 0/400。
 
-**仍未涵蓋**：刪除與建目錄操作（`delete_file` / `create_directory`）尚未實作。
+6. **delete_file + rollback**（v0.4.2）：刪除既有檔 → `manual_rollback` 從
+   archive 解壓還原（restore() 的「還原已消失的檔」分支，此前只有 checkpoint
+   層測過）；刪不存在回 `not_found`；symlink / 目錄 / forever-deny / 絕對路徑 /
+   `../` / 缺 path 全 `blocked`。
+
+**設計邊界（v0.4.2）**：`create_directory` **刻意未做**。Checkpoint 是檔案層
+（file hash + tar.gz），`_validate_allow_path` 直接 reject 目錄，沒有「記錄某
+目錄本不存在」的機制。加 `create_directory` 需先解決 checkpoint 如何管理目錄
+狀態，是獨立的設計問題，不隨手加。
 
 ### 後續版本規劃
 
@@ -600,6 +609,7 @@ confinement 洩漏）。修法：`_sha256` 改用 `os.open(..., O_NOFOLLOW)`，�
 | 2026-07-22 | v0.3 **對齊實作**：文件移入 `docs/` 納版控；目錄更正為 `mcp_server/`（附遮蔽 SDK 的實測理由）；§4.2 `sandbox_execute` 改為唯讀白名單契約（`operation`/`path`/`session_id`，`additionalProperties:false`）；§5 演算法改為 fd-relative 唯讀流程；§9 驗收標準改寫，明列 checkpoint/rollback 目前觸達不到；加註「不可用 returncode 判定呼叫成功」 |
 | 2026-07-22 | v0.4 **加入寫入操作**：新增 `write_file`（契約多一個 `content`，上限 1MB）；§4.2 補寫入安全順序（lstat 擋 symlink → checkpoint → 原子 temp+rename → 失敗回退），說明為何 symlink 檢查必須早於 checkpoint；§5 流程分唯讀/寫入兩路；§9 新增第 4 條驗收，原「延後驗收」的 checkpoint/rollback 已完成。修復 `rollback.py` 兩個從未被執行過的缺陷。仍未做：`delete_file` / `create_directory`、寫入路徑的 TOCTOU 壓力測試 |
 | 2026-07-23 | v0.4.1 **寫入路徑 TOCTOU 壓測 + checkpoint symlink 硬化**：新增 §9 第 5 條驗收（背景 thread 換 symlink，300 次零外洩，5 次無 flake）。壓測催生修復：`Checkpoint._sha256()` 改 `O_NOFOLLOW` + `create()` 加 `is_symlink()` 前置檢查，關掉 lstat→checkpoint 之間讓 checkpoint 捕獲 workspace 外內容 hash 的 race 窗（修前 65/400，修後 0/400） |
+| 2026-07-23 | v0.4.2 **加入 delete_file**：§4.2 白名單增 `delete_file`（目標須為已存在的 regular file）；§9 新增第 6 條驗收，讓 `restore()` 的「還原已消失的檔」分支第一次經 execute() 端到端跑過。明記 `create_directory` 刻意未做的理由（checkpoint 是檔案層，不管理目錄狀態）。全套 61 passed |
 
 
 &nbsp;

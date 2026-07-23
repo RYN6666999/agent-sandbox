@@ -73,6 +73,6 @@ Backlog: clarify_routing UI / headless / 沙箱 / Model Router
 **Round 3 實戰結果（2026-06-27）：**
 - 發現三層疊加 bug（clarify 順序 → eval script tuple truth → classifier dataclass）
 - Eval 從 9/15 → 15/15
-- 測試從 300+ → 365 passed
+- 測試全綠（跑 pytest 看數）
 - OPTIMIZATION.md 所有（待填）已填入實戰數據
 - 下一個值得投資的點：擴充 eval 場景數（>20 題）、量測 classifier 信度穩定度

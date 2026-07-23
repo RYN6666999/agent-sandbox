@@ -58,7 +58,13 @@ class Checkpoint:
             abs_path = work_dir / rel_path
             if not abs_path.exists():
                 continue
-            st = abs_path.stat()
+            # symlink 一律拒絕。checkpoint 只快照 workspace 內的實體檔案；
+            # 若跟隨 symlink，_sha256 會讀到 workspace 外的內容並寫進 meta。
+            # 這個 is_symlink 檢查與 write 路徑呼叫端的 lstat 之間仍有 race
+            # 窗口，真正關窗的是 _sha256 的 O_NOFOLLOW（見該函式）。
+            if abs_path.is_symlink():
+                raise ValueError(f"symlink not allowed: {rel_path}")
+            st = abs_path.lstat()
             file_hashes[rel_path] = _sha256(abs_path)
             file_hashes[f"__meta__{rel_path}"] = json.dumps({
                 "mode": st.st_mode, "size": st.st_size,
@@ -148,8 +154,15 @@ class Checkpoint:
 
 
 def _sha256(path: Path) -> str:
+    """SHA256，開檔用 O_NOFOLLOW — 絕不跟隨 symlink。
+
+    這是 checkpoint symlink 防護的原子關窗點：即使目標在 is_symlink() 檢查
+    之後、開檔之前被換成 symlink，O_NOFOLLOW 也會讓 os.open 丟 ELOOP，
+    checkpoint 乾淨失敗，而不是讀到 workspace 外的內容。
+    """
     h = hashlib.sha256()
-    with open(path, "rb") as f:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()

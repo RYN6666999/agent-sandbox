@@ -563,8 +563,19 @@ v0.2 的三條有一條在目前設計下**測不了**：第 2 條要求「跑�
 
 四條過了 = 契約層、路徑層、**以及可回退寫入**的安全模型都立住。
 
-**仍未涵蓋**：刪除與建目錄操作（`delete_file` / `create_directory`）尚未實作；
-寫入路徑的 TOCTOU 壓力測試尚未撰寫（現有壓力測試只涵蓋 `read_file`）。
+5. **寫入路徑 TOCTOU**（v0.4.1）：背景 thread 狂換 symlink，主 thread 反覆
+   寫入 300 次。三個不變量零違反 —— workspace 外檔案不被寫入、不殘留暫存檔、
+   checkpoint 不捕獲外部內容 hash。跑 5 次無 flake。
+
+**v0.4.1 修復（此測試催生）**：`Checkpoint._sha256()` 原本用 `open()` 會跟隨
+symlink。`_stat_target` 的 lstat 檢查與 `Checkpoint.create` 之間有 race 窗，
+壓力測試前身版本 400 次中 65 次讓 checkpoint 把 **workspace 外檔案的內容 hash**
+寫進 snapshot meta（archive 存的是 symlink 條目非內容，故非內容外洩，但仍是
+confinement 洩漏）。修法：`_sha256` 改用 `os.open(..., O_NOFOLLOW)`，並在
+`create()` 加 `is_symlink()` 前置檢查。O_NOFOLLOW 是原子關窗點——即使 symlink
+在檢查後才換上，開檔也會 ELOOP，checkpoint 乾淨失敗而非讀到外部。修後 0/400。
+
+**仍未涵蓋**：刪除與建目錄操作（`delete_file` / `create_directory`）尚未實作。
 
 ### 後續版本規劃
 
@@ -588,6 +599,7 @@ v0.2 的三條有一條在目前設計下**測不了**：第 2 條要求「跑�
 | 2026-07-21 | v0.2 修訂：檔名正式化、角色映射入文、Loop 定案拉式、`agentos.json` 收斂為 config-only、MVP 收斂至 `sandbox_execute` 單工具 |
 | 2026-07-22 | v0.3 **對齊實作**：文件移入 `docs/` 納版控；目錄更正為 `mcp_server/`（附遮蔽 SDK 的實測理由）；§4.2 `sandbox_execute` 改為唯讀白名單契約（`operation`/`path`/`session_id`，`additionalProperties:false`）；§5 演算法改為 fd-relative 唯讀流程；§9 驗收標準改寫，明列 checkpoint/rollback 目前觸達不到；加註「不可用 returncode 判定呼叫成功」 |
 | 2026-07-22 | v0.4 **加入寫入操作**：新增 `write_file`（契約多一個 `content`，上限 1MB）；§4.2 補寫入安全順序（lstat 擋 symlink → checkpoint → 原子 temp+rename → 失敗回退），說明為何 symlink 檢查必須早於 checkpoint；§5 流程分唯讀/寫入兩路；§9 新增第 4 條驗收，原「延後驗收」的 checkpoint/rollback 已完成。修復 `rollback.py` 兩個從未被執行過的缺陷。仍未做：`delete_file` / `create_directory`、寫入路徑的 TOCTOU 壓力測試 |
+| 2026-07-23 | v0.4.1 **寫入路徑 TOCTOU 壓測 + checkpoint symlink 硬化**：新增 §9 第 5 條驗收（背景 thread 換 symlink，300 次零外洩，5 次無 flake）。壓測催生修復：`Checkpoint._sha256()` 改 `O_NOFOLLOW` + `create()` 加 `is_symlink()` 前置檢查，關掉 lstat→checkpoint 之間讓 checkpoint 捕獲 workspace 外內容 hash 的 race 窗（修前 65/400，修後 0/400） |
 
 
 &nbsp;

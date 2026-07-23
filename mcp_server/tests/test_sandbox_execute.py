@@ -464,6 +464,85 @@ class TestSchema:
         wh.close()
         assert leaks == 0, f"TOCTOU leak: {leaks}/{total}"
 
+    def test_toctou_race_write_file(self):
+        """寫入路徑 TOCTOU：背景 thread 狂換 symlink，寫入零外洩。
+
+        write_file 有兩個時間窗：lstat 檢查→checkpoint、checkpoint→rename。
+        背景 thread 持續把目標在「常規檔」與「指向 workspace 外的 symlink」
+        之間翻轉，主 thread 反覆走完整寫入路徑。三個不變量：
+
+        1. workspace 外的檔案內容永不被寫入（rename 不跟隨 symlink）
+        2. 不殘留 .tmp. 暫存檔（O_EXCL + finally unlink）
+        3. checkpoint 永不捕獲 workspace 外的內容 hash
+           （_sha256 的 O_NOFOLLOW 關掉 lstat→checkpoint 的 race 窗）
+
+        第 3 條是這個測試催生的修復點：加寫入前，checkpoint 的 _sha256
+        會跟隨 symlink，此測試的前身版本在 400 次中有 65 次捕獲外部 hash。
+        """
+        import threading, json, hashlib
+        from mcp_server.config import Config
+        from mcp_server.sandbox.workspace import WorkspaceHandle
+        from mcp_server.sandbox.executor import execute
+
+        os.environ["AGENTOS_WORK_DIR"] = str(WORK_DIR)
+        os.environ["AGENTOS_SNAPSHOT_DIR"] = str(SNAP_DIR)
+        os.environ["AGENTOS_AUDIT_PATH"] = str(TEST_DIR / "audit.log")
+        cfg = Config()
+
+        outside = TEST_DIR / "toctou_write_outside.txt"
+        SENTINEL = "OUTSIDE-UNTOUCHED"
+        outside.write_text(SENTINEL)
+        out_hash = hashlib.sha256(SENTINEL.encode()).hexdigest()
+        target = WORK_DIR / "race_target"
+
+        stop = threading.Event()
+
+        def swapper():
+            while not stop.is_set():
+                try:
+                    target.unlink(missing_ok=True)
+                    os.symlink(str(outside), target)
+                except OSError:
+                    pass
+                try:
+                    target.unlink(missing_ok=True)
+                    target.write_text("regular")
+                except OSError:
+                    pass
+
+        wh = WorkspaceHandle(WORK_DIR)
+        t = threading.Thread(target=swapper, daemon=True)
+        t.start()
+        total = 300
+        outside_writes = 0
+        temp_leaks = 0
+        ckpt_captured_outside = 0
+        try:
+            for i in range(total):
+                r = execute(operation="write_file", wh=wh, config=cfg,
+                            params={"path": "race_target", "content": f"NEW-{i}"},
+                            session_id="race")
+                if outside.read_text() != SENTINEL:
+                    outside_writes += 1
+                if any(".tmp." in p.name for p in WORK_DIR.iterdir()):
+                    temp_leaks += 1
+                cid = r.get("checkpoint_id")
+                if cid:
+                    mp = SNAP_DIR / f"{cid}.json"
+                    if mp.exists():
+                        meta = json.loads(mp.read_text())
+                        if meta["file_hashes"].get("race_target") == out_hash:
+                            ckpt_captured_outside += 1
+        finally:
+            stop.set()
+            t.join(timeout=5)
+            wh.close()
+
+        assert outside_writes == 0, f"workspace 逃逸: {outside_writes}/{total} 次外部檔案被寫入"
+        assert temp_leaks == 0, f"暫存檔殘留: {temp_leaks} 次"
+        assert ckpt_captured_outside == 0, f"checkpoint 捕獲外部內容: {ckpt_captured_outside}/{total}"
+        assert outside.read_text() == SENTINEL
+
 
 # ═══════════════ F. Worker Shadow ═══════════════
 

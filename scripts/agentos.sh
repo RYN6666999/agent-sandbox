@@ -45,6 +45,12 @@ Aris Bridge 指令:
   bridge log       查看 bridge 日誌（tail -20）
   bridge restart   重新啟動 bridge
 
+Headroom 指令:
+  headroom status  檢查 Headroom proxy 狀態
+  headroom start   啟動 Headroom proxy（via launchd）
+  headroom restart 重新啟動 Headroom proxy
+  headroom log     查看 Headroom proxy 日誌
+
 MCP Server 指令:
   mcp              啟動 MCP Server（stdio）
   mcp serve        啟動 MCP Server（SSE, port 8001）
@@ -81,9 +87,11 @@ detect_tools() {
     tools=$(echo "$tools" | jq --arg v "$av_ver" '. + {"agentsview": {"status": "installed", "version": $v, "capabilities": ["session-analytics", "token-tracking"]}}' 2>/dev/null || echo "$tools")
   fi
 
-  # headroom (Python package)
-  if python3 -c "import headroom" 2>/dev/null; then
-    tools=$(echo "$tools" | jq '. + {"headroom": {"status": "installed", "capabilities": ["token-compression", "content-routing", "ccr"]}}' 2>/dev/null || echo "$tools")
+  # headroom (CLI tool)
+  if command -v headroom &>/dev/null; then
+    local hr_ver
+    hr_ver=$(headroom --version 2>/dev/null | head -1)
+    tools=$(echo "$tools" | jq --arg v "$hr_ver" '. + {"headroom": {"status": "installed", "version": $v, "capabilities": ["input-compression", "smartcrusher-json", "codecompressor-ast", "ccr-reversible", "cache-aligner"]}}' 2>/dev/null || echo "$tools")
   fi
 
   # NVIDIA SkillSpector (pip package)
@@ -176,6 +184,13 @@ cmd_health() {
     echo "  ✅ AgentOS server — $BASE"
   else
     echo "  ⚠️  AgentOS server — 未執行 (agentos.sh up)"
+  fi
+
+  # Headroom proxy
+  if curl -sf http://127.0.0.1:8787/health &>/dev/null; then
+    echo "  ✅ Headroom proxy — http://127.0.0.1:8787"
+  else
+    echo "  ⚠️  Headroom proxy — 未執行 (launchctl start com.headroom.proxy)"
   fi
 
   # Tools
@@ -278,6 +293,56 @@ cmd_bridge() {
 }
 
 
+# ── Headroom 管理 ─────────────────────────────────────────
+
+HEADROOM_PLIST="$HOME/Library/LaunchAgents/com.headroom.proxy.plist"
+
+cmd_headroom() {
+  local action="${1:-}"; shift || true
+  case "$action" in
+    status)
+      if launchctl list com.headroom.proxy &>/dev/null; then
+        local pid
+        pid=$(launchctl list com.headroom.proxy | awk '{print $1}' | head -1)
+        if curl -sf http://127.0.0.1:8787/health &>/dev/null; then
+          echo "✅ Headroom proxy 運行中 (PID $pid, :8787)"
+        else
+          echo "⚠️  Headroom proxy 已註冊 launchd 但未就緒 (PID $pid)"
+        fi
+      else
+        echo "⚠️  Headroom proxy 未執行"
+        echo "   啟動: agentos.sh headroom start"
+      fi;;
+    start)
+      if launchctl list com.headroom.proxy &>/dev/null; then
+        echo "✅ Headroom proxy 已在 launchd 中"
+      else
+        launchctl load "$HEADROOM_PLIST" 2>/dev/null
+        sleep 2
+        if curl -sf http://127.0.0.1:8787/health &>/dev/null; then
+          echo "✅ Headroom proxy 已啟動"
+        else
+          echo "⚠️  Headroom proxy 啟動失敗，檢查日誌"
+        fi
+      fi;;
+    restart)
+      launchctl unload "$HEADROOM_PLIST" 2>/dev/null
+      sleep 1
+      launchctl load "$HEADROOM_PLIST" 2>/dev/null
+      sleep 2
+      if curl -sf http://127.0.0.1:8787/health &>/dev/null; then
+        echo "✅ Headroom proxy 已重新啟動"
+      else
+        echo "⚠️  Headroom proxy 重啟失敗"
+      fi;;
+    log)
+      tail -20 /tmp/headroom-launchd.log 2>/dev/null || echo "日誌不存在";;
+    *)
+      echo "用法: headroom status|start|restart|log"; exit 1;;
+  esac
+}
+
+
 # ── Main dispatch ─────────────────────────────────────────
 
 # ── MCP Server 管理 ────────────────────────────────────────
@@ -340,12 +405,17 @@ case "$CMD" in
   brain)          cmd_brain "$@";;
   bridge)         cmd_bridge "$@";;
   mcp)            cmd_mcp "$@";;
+  headroom)       cmd_headroom "$@";;
   up)        if curl -sf localhost:8000/health &>/dev/null; then
                echo "✅ AgentOS already running on :8000"
              else
                cd "$SCRIPT_DIR/.." && bash dev.sh &
                sleep 2
                curl -sf localhost:8000/health &>/dev/null && echo "✅ AgentOS started" || echo "⚠️ AgentOS didn't start — check dev.sh"
+             fi
+             # 連帶確保 Headroom proxy 在線
+             if command -v headroom &>/dev/null; then
+               cmd_headroom status &>/dev/null || cmd_headroom start &>/dev/null
              fi;;
   down)      lsof -ti:8000 | xargs kill -9 2>/dev/null && echo "stopped" || echo "nothing on :8000";;
   --help|-h) usage;;

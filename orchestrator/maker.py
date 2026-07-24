@@ -27,6 +27,7 @@ import litellm
 from contracts.task_spec import TaskSpec
 from orchestrator import executor_registry
 from orchestrator import decision_log
+from orchestrator.config_files import load_settings as _load_merged_settings
 from orchestrator.model_registry import resolve as _resolve
 from router import route
 from router.skill_injector import build_system_prompt
@@ -77,12 +78,7 @@ class MakeResult:
 
 
 def _load_settings() -> dict:
-    if SETTINGS_PATH.exists():
-        try:
-            return json.loads(SETTINGS_PATH.read_text())
-        except Exception:
-            pass
-    return {}
+    return _load_merged_settings()
 
 
 def make(spec: TaskSpec, *, on_token: Callable[[str], None] | None = None,

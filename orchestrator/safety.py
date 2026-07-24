@@ -8,6 +8,7 @@ environment". Do NOT block business-logic deletions that run inside a sandbox
 Tune the lists below to widen or narrow coverage.
 """
 import re
+from orchestrator.config_files import load_settings as _load_merged_settings
 
 # ── tuneable constants ────────────────────────────────────────────────────────
 
@@ -53,10 +54,7 @@ _PATTERN_TRIGGERS: list[re.Pattern] = [
 def _load_restricted_paths() -> list[str]:
     """Read restricted_paths from settings.json."""
     try:
-        import json as _json
-        from pathlib import Path as _Path
-        sp = _Path(__file__).resolve().parent.parent / "data" / "settings.json"
-        return _json.loads(sp.read_text()).get("restricted_paths", [])
+        return _load_merged_settings().get("restricted_paths", [])
     except Exception:
         return []
 

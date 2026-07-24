@@ -7,6 +7,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Any, Callable
+from orchestrator.config_files import load_settings as _load_merged_settings
 
 SETTINGS_PATH = Path(__file__).parent.parent / "data" / "settings.json"
 _SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
@@ -61,7 +62,7 @@ _BUILTIN_EXECUTORS: dict[str, dict[str, Any]] = {
 def _load_settings_overrides() -> dict[str, dict[str, Any]]:
     """Load executors section from settings.json, if present."""
     try:
-        data = json.loads(SETTINGS_PATH.read_text())
+        data = _load_merged_settings()
         return data.get("executors", {})
     except Exception:
         return {}

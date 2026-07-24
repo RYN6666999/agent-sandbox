@@ -8,6 +8,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
+from orchestrator.config_files import load_agentos_config
 
 # ── 預設路徑 ──────────────────────────────────────────────
 
@@ -41,8 +42,7 @@ class Config:
         if not self.path.exists():
             self._raw = {"version": "0.0.0", "tools": {}}
             return
-        with open(self.path) as f:
-            self._raw = json.load(f)
+        self._raw = load_agentos_config()
 
     def _validate_work_dir(self) -> None:
         """AGENTOS_WORK_DIR 必須顯式設定，且必須是真實目錄（非 symlink）。"""

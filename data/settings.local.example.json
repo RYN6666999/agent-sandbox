@@ -1,0 +1,24 @@
+{
+  "api_keys": {
+    "openrouter": "",
+    "gemini": "",
+    "agnes": ""
+  },
+  "gbrain": {
+    "enabled": false,
+    "url": "http://localhost:3457",
+    "token": ""
+  },
+  "executors": {
+    "example-local-executor": {
+      "name": "example-local-executor",
+      "binary": "bash",
+      "flags": [
+        "-lc",
+        "echo local executor"
+      ],
+      "type": "subprocess",
+      "timeout": 30
+    }
+  }
+}

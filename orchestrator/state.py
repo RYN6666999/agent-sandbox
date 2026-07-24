@@ -16,6 +16,7 @@ import json
 import time
 from pathlib import Path
 from typing import Any
+from orchestrator.config_files import load_settings as _load_merged_settings
 
 STATE_PATH = Path(__file__).resolve().parent.parent / "data" / "state.json"
 
@@ -177,8 +178,7 @@ def spec_freshness_check() -> dict[str, Any]:
 def _load_setting(key: str, default: Any = None) -> Any:
     """Read a single key from settings.json."""
     try:
-        sp = Path(__file__).resolve().parent.parent / "data" / "settings.json"
-        return json.loads(sp.read_text()).get(key, default)
+        return _load_merged_settings().get(key, default)
     except Exception:
         return default
 

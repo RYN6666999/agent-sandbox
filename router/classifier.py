@@ -17,6 +17,7 @@ load_dotenv()
 
 import litellm
 from router.rules import TaskType
+from orchestrator.config_files import load_settings as _load_merged_settings
 from orchestrator.model_registry import resolve as _resolve
 
 _SETTINGS_PATH = Path(__file__).parent.parent / "data" / "settings.json"
@@ -25,7 +26,7 @@ _DEFAULT_CLASSIFIER = "openrouter-classifier"
 
 def _classifier_model() -> str:
     try:
-        return json.loads(_SETTINGS_PATH.read_text()).get("plan_model", _DEFAULT_CLASSIFIER)
+        return _load_merged_settings().get("plan_model", _DEFAULT_CLASSIFIER)
     except Exception:
         return _DEFAULT_CLASSIFIER
 

@@ -20,6 +20,7 @@ BASE="${AGENTOS_URL:-http://localhost:8000}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENTOS_DIR="${SCRIPT_DIR}/.."
 RUNTIME_FILE="${AGENTOS_DIR}/agentos.json"
+RUNTIME_LOCAL_FILE="${AGENTOS_DIR}/agentos.local.json"
 
 usage() {
     cat <<EOF
@@ -116,7 +117,7 @@ generate_runtime() {
   local timestamp
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-  cat > "$RUNTIME_FILE" <<RUNTIMEEOF
+  cat > "$RUNTIME_LOCAL_FILE" <<RUNTIMEEOF
 {
   "agentos": "runtime",
   "version": "0.1.0",
@@ -138,7 +139,7 @@ generate_runtime() {
   }
 }
 RUNTIMEEOF
-  echo "✅ agentos.json 已產生: $RUNTIME_FILE"
+  echo "✅ agentos.local.json 已產生: $RUNTIME_LOCAL_FILE"
 }
 
 # ── Init ──────────────────────────────────────────────────
@@ -166,11 +167,15 @@ cmd_init() {
 # ── Tools ─────────────────────────────────────────────────
 
 cmd_tools() {
-  if [[ ! -f "$RUNTIME_FILE" ]]; then
+  local show_file="$RUNTIME_LOCAL_FILE"
+  if [[ ! -f "$show_file" ]]; then
+    show_file="$RUNTIME_FILE"
+  fi
+  if [[ ! -f "$show_file" ]]; then
     echo "⚠️ 尚未執行 init，先跑: ./agentos.sh init"
     exit 1
   fi
-  cat "$RUNTIME_FILE" | jq '.tools'
+  cat "$show_file" | jq '.tools'
 }
 
 # ── Health ────────────────────────────────────────────────
@@ -194,8 +199,12 @@ cmd_health() {
   fi
 
   # Tools
-  if [[ -f "$RUNTIME_FILE" ]]; then
-    jq -r '.tools | to_entries[] | "  \(if .value.status == "installed" or .value.status == "active" or .value.status == "builtin" then "✅" else "⚠️" end) \(.key) — \(.value.status)"' "$RUNTIME_FILE"
+  local health_file="$RUNTIME_LOCAL_FILE"
+  if [[ ! -f "$health_file" ]]; then
+    health_file="$RUNTIME_FILE"
+  fi
+  if [[ -f "$health_file" ]]; then
+    jq -r '.tools | to_entries[] | "  \(if .value.status == "installed" or .value.status == "active" or .value.status == "builtin" then "✅" else "⚠️" end) \(.key) — \(.value.status)"' "$health_file"
   else
     echo "  ⚠️  尚未執行 init"
   fi
@@ -204,7 +213,7 @@ cmd_health() {
 # ── Run ───────────────────────────────────────────────────
 
 cmd_run() {
-  if [[ ! -f "$RUNTIME_FILE" ]]; then
+  if [[ ! -f "$RUNTIME_LOCAL_FILE" && ! -f "$RUNTIME_FILE" ]]; then
     cmd_init
   fi
   # pass through to AgentOS run endpoint

@@ -30,6 +30,7 @@ import urllib.error
 import uuid
 from pathlib import Path
 from typing import Any
+from orchestrator.config_files import load_settings as _load_merged_settings
 
 try:
     import jieba
@@ -51,19 +52,16 @@ def _load_gbrain_config() -> dict[str, Any]:
     global _GBRAIN_CONFIG_CACHE
     if _GBRAIN_CONFIG_CACHE is not None:
         return _GBRAIN_CONFIG_CACHE
-    settings_path = Path(__file__).parent.parent / "data" / "settings.json"
     try:
-        if settings_path.exists():
-            raw = settings_path.read_text(encoding="utf-8")
-            cfg = json.loads(raw)
-            gbrain = cfg.get("gbrain", {})
-            if gbrain.get("enabled", False):
-                _GBRAIN_CONFIG_CACHE = {
-                    "url": gbrain.get("url", _GBRAIN_DEFAULT_URL),
-                    "token": gbrain.get("token", ""),
-                    "enabled": True,
-                }
-                return _GBRAIN_CONFIG_CACHE
+        cfg = _load_merged_settings()
+        gbrain = cfg.get("gbrain", {})
+        if gbrain.get("enabled", False):
+            _GBRAIN_CONFIG_CACHE = {
+                "url": gbrain.get("url", _GBRAIN_DEFAULT_URL),
+                "token": gbrain.get("token", ""),
+                "enabled": True,
+            }
+            return _GBRAIN_CONFIG_CACHE
     except Exception:
         pass
     _GBRAIN_CONFIG_CACHE = {"url": _GBRAIN_DEFAULT_URL, "enabled": False, "token": ""}

@@ -22,6 +22,8 @@ from orchestrator.loop import run_verification
 from orchestrator.maker import make as run_maker
 from orchestrator.checker import check as run_checker
 from orchestrator import decision_log
+from orchestrator.config_files import load_settings as _load_merged_settings
+from orchestrator.config_files import save_settings_local as _save_local_settings
 
 app = FastAPI(redirect_slashes=False)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -87,14 +89,14 @@ SETTINGS_PATH = Path(__file__).parent.parent / "data" / "settings.json"
 
 
 def _load_settings() -> dict:
-    if SETTINGS_PATH.exists():
-        return json.loads(SETTINGS_PATH.read_text())
+    merged = _load_merged_settings()
+    if merged:
+        return merged
     return SettingsPayload().model_dump()
 
 
 def _save_settings(data: dict):
-    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(data, indent=2))
+    _save_local_settings(data)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────

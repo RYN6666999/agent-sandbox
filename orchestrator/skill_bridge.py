@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator import executor_registry
+from orchestrator.config_files import load_settings as _load_merged_settings
+from orchestrator.config_files import save_settings_local as _save_local_settings
 
 # Where Claude CLI stores its skills
 CLAUDE_SKILLS_DIR = Path.home() / ".claude" / "skills"
@@ -17,14 +19,11 @@ _BUILTIN_NAMES = {"web-search", "agnes-analyze", "agnes-image", "agnes-video", "
 
 
 def _load_settings() -> dict[str, Any]:
-    try:
-        return json.loads(SETTINGS_PATH.read_text())
-    except Exception:
-        return {}
+    return _load_merged_settings()
 
 
 def _save_settings(data: dict[str, Any]) -> None:
-    SETTINGS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    _save_local_settings(data)
 
 
 def _safe_executor_name(skill_name: str, suffix: str = "") -> str:

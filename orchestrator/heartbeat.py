@@ -30,6 +30,7 @@ import random as _random
 import time
 from pathlib import Path
 from typing import Any
+from orchestrator.config_files import load_settings as _load_merged_settings
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -84,9 +85,7 @@ def _get_queue_depth() -> int:
 def _load_max_runtime() -> int | None:
     """Read max_loop_runtime_seconds from settings.json."""
     try:
-        import json
-        sp = Path(__file__).resolve().parent.parent / "data" / "settings.json"
-        val = json.loads(sp.read_text()).get("max_loop_runtime_seconds", 0)
+        val = _load_merged_settings().get("max_loop_runtime_seconds", 0)
         return int(val) if int(val) > 0 else None
     except Exception:
         return None

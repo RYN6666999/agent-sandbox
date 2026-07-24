@@ -10,17 +10,15 @@
 
 ### P1 本 session
 - ✅ **env vars → config 檔**：`~/.scream-code/headroom.toml` 建立，bridge 讀取 TOML + env var 覆蓋（`_load_headroom_config()`）
-- ✅ **e2e test**：`test_headroom_pipeline.py`（21 tests）— mock Aris 通道、mock HTTP、測試完整 pipeline（classify→execute→compress→gate→log）
+- ✅ **e2e test**：已跑 headroom pipeline 測試（mock Aris 通道、mock HTTP，覆蓋 classify→execute→compress→gate→log）
 
 ### P2 本 session
 - ✅ **Kompress ML**：模型已下載（`~/.cache/huggingface/hub/models--chopratejas--kompress-v2-base/`），ONNX session 可正常載入。Proxy 的 kompress 顯示 `deferred`（非 unhealthy），第一次實際使用時自動載入。非真正問題。
-- ✅ **BDD 33 場景 pytest**：`test_headroom_bdd.py`（33 tests）— 參數化覆蓋全部 7 個 Feature 的 BDD 場景
+- ✅ **BDD 測試**：已跑 headroom BDD 測試，參數化覆蓋 7 個 Feature 場景
 
-## 全部測試通過
+## 測試狀態
 
-```
-54 passed in 0.15s
-```
+- 已執行 pytest，請以「當下重跑結果」為準（避免硬編碼數字漂移）
 
 ## 剩餘工作
 
@@ -33,6 +31,6 @@
 |------|------|
 | `~/.scream-code/headroom.toml` | Headroom 設定檔（取代環境變數硬編碼） |
 | `~/Developer/neuralis/scripts/agentos-aris-bridge.py` | bridge 本體（含 _load_headroom_config 函數） |
-| `~/Developer/neuralis/tests/test_headroom_pipeline.py` | 21 e2e pipeline tests |
-| `~/Developer/neuralis/tests/test_headroom_bdd.py` | 33 parametrized BDD tests |
-| `~/agent-sandbox/docs/specs/integration/headroom-bdd.md` | 33 BDD 場景規格 |
+| neuralis headroom pipeline 測試檔（外部 repo） | e2e pipeline 測試（以 neuralis repo 為準） |
+| neuralis headroom BDD 測試檔（外部 repo） | 參數化 BDD 測試（以 neuralis repo 為準） |
+| `~/agent-sandbox/docs/specs/integration/headroom-bdd.md` | Headroom BDD 場景規格 |

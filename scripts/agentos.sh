@@ -44,6 +44,11 @@ Aris Bridge 指令:
   bridge status    檢查 bridge 運行狀態
   bridge log       查看 bridge 日誌（tail -20）
   bridge restart   重新啟動 bridge
+
+MCP Server 指令:
+  mcp              啟動 MCP Server（stdio）
+  mcp serve        啟動 MCP Server（SSE, port 8001）
+  mcp stop         停止 MCP Server
 EOF
   echo ""
   echo "  注意：codebase-memory-mcp cli 的 debug log 送 stderr"
@@ -272,7 +277,59 @@ cmd_bridge() {
   esac
 }
 
+
 # ── Main dispatch ─────────────────────────────────────────
+
+# ── MCP Server 管理 ────────────────────────────────────────
+
+MCP_PID_FILE="/tmp/agentos-mcp-server.pid"
+
+cmd_mcp() {
+  local action="${1:-}"; shift || true
+  case "$action" in
+    serve|start)
+      if [ -f "$MCP_PID_FILE" ] && kill -0 "$(cat "$MCP_PID_FILE")" 2>/dev/null; then
+        echo "✅ MCP Server 已在運行 (PID $(cat "$MCP_PID_FILE"))"
+        return 0
+      fi
+      cd "$AGENTOS_DIR"
+      nohup python3 -m mcp_server.server --serve --port 8001 > /tmp/agentos-mcp-server.log 2>&1 &
+      local pid=$!
+      echo "$pid" > "$MCP_PID_FILE"
+      sleep 1
+      echo "✅ MCP Server 已啟動 (PID $pid, SSE :8001)"
+      echo "   日誌: /tmp/agentos-mcp-server.log";;
+    stop)
+      if [ -f "$MCP_PID_FILE" ]; then
+        local pid
+        pid=$(cat "$MCP_PID_FILE")
+        kill "$pid" 2>/dev/null && echo "✅ MCP Server 已停止 (PID $pid)" || echo "⚠️  PID $pid 不存在"
+        rm -f "$MCP_PID_FILE"
+      else
+        local pid
+        pid=$(ps aux | grep "mcp.server" | grep -v grep | awk '{print $2}' | head -1)
+        if [ -n "$pid" ]; then
+          kill "$pid" 2>/dev/null && echo "✅ MCP Server 已停止 (PID $pid)"
+        else
+          echo "⚠️  MCP Server 未在運行"
+        fi
+      fi;;
+    status)
+      if [ -f "$MCP_PID_FILE" ] && kill -0 "$(cat "$MCP_PID_FILE")" 2>/dev/null; then
+        local pid
+        pid=$(cat "$MCP_PID_FILE")
+        echo "✅ MCP Server 運行中 (PID $pid, 日誌: /tmp/agentos-mcp-server.log)"
+      else
+        echo "⚠️  MCP Server 未在運行"
+      fi;;
+    log)
+      tail -20 /tmp/agentos-mcp-server.log 2>/dev/null || echo "日誌不存在";;
+    ""|stdio)
+      cd "$AGENTOS_DIR" && python3 -m mcp_server.server;;
+    *)
+      echo "用法: mcp [serve|start|stop|status|log]"; exit 1;;
+  esac
+}
 
 CMD="${1:-}"; shift || true
 case "$CMD" in
@@ -282,6 +339,7 @@ case "$CMD" in
   run)            cmd_run "$@";;
   brain)          cmd_brain "$@";;
   bridge)         cmd_bridge "$@";;
+  mcp)            cmd_mcp "$@";;
   up)        if curl -sf localhost:8000/health &>/dev/null; then
                echo "✅ AgentOS already running on :8000"
              else

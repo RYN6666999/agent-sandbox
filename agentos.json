@@ -83,7 +83,11 @@
     "aris-status": "aris-status.py (health check via bridge)",
     "aris-channel": "agentos-aris-bridge",
     "aris-task": "agentos-aris-bridge",
-    "aris-request": "agentos-aris-bridge"
+    "aris-request": "agentos-aris-bridge",
+    "glob": "find / fd (file globbing via bridge)",
+    "grep": "ripgrep / rg (text search via bridge)",
+    "fetch-url": "curl (URL fetch via bridge)",
+    "kick-aris": "kick-aris.py (push message/task to Aris via bridge)"
   },
   "aris_bridge": {
     "channel": "/tmp/aris-scream-channel.jsonl",

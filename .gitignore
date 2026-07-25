@@ -17,3 +17,6 @@ mcp_server/__pycache__/
 agentos.local.json
 data/settings.local.json
 data/ratchet_events.log
+# ratchet 信任履歷 —— runtime state，git clean -fd 會誤殺（曾發生 2026-07-24）
+data/ratchet.json
+data/ratchet.*.json

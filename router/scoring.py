@@ -30,8 +30,9 @@ SCORE_COST_WITHIN_BUDGET = 1.0
 SCORE_COST_OVER_BUDGET = 0.0
 
 # lane 門檻
-CONFIDENCE_THRESHOLD_SANDBOX = 0.5   # 信心夠進 sandbox
-CONFIDENCE_THRESHOLD_AUTO = 0.8      # 信心夠進 auto（仍需簽核）
+# 降級過的 human 類要爬回 sandbox 的信心門檻。
+# 升 auto 的門檻不在這裡 —— 那是 ratchet.PASS_THRESHOLD_FOR_AUTO，只有一份。
+CONFIDENCE_THRESHOLD_SANDBOX = 0.5
 COST_BUDGET_TOKENS = 100_000         # 預算上限（tokens）
 COST_BUDGET_COMPUTE = 10_000         # 預算上限（compute units）
 
@@ -82,6 +83,11 @@ def _determine_lane(
     """四條 lane 決定邏輯。
 
     可回退性是硬地板：escaping 類永遠封頂 human。
+
+    信心分**不擋進沙箱，只擋畢業**（2026-07-31 修冷啟動死鎖）：
+    沙箱是「拿真結果」的地方，樣本從那裡來。拿信心分擋沙箱會鎖死 ——
+    沒樣本 → 信心 0 → 進不了沙箱 → 永遠沒樣本。ratchet.json 的 level
+    才是信任狀態的權威，信心分交給 ratchet.update_ratchet 管升降級。
     """
     # 硬拒條件：成本爆預算
     if cost_score == SCORE_COST_OVER_BUDGET:
@@ -96,22 +102,24 @@ def _determine_lane(
     if verifiability_score < SCORE_VERIFIABLE:
         return "human"
 
-    # 信心閘
-    if confidence_score < CONFIDENCE_THRESHOLD_SANDBOX:
+    # 全新任務類（ratchet 沒這筆）→ human。人先看過、Ryan 決定要不要放進沙箱觀察
+    if entry is None:
         return "human"
 
-    # 歷史夠 → 可進 sandbox
-    if entry is None or entry.level == "human":
+    # ratchet 明確標 human（含曾降級的）→ 要靠信心爬回來。
+    # 注意：降級後信心分不會自己回升（human lane 不產樣本），
+    # 這是刻意的 —— 降級是懲罰，回沙箱要 Ryan 手動重置 level。
+    if entry.level == "human":
+        if confidence_score < CONFIDENCE_THRESHOLD_SANDBOX:
+            return "human"
         return "sandbox"
 
-    # 已在 sandbox → 檢查能否進 auto
+    # ratchet 已放在 sandbox → 進沙箱真跑、累積樣本。
+    # 升 auto 是 ratchet + Ryan 簽核的事（policy b），不在這裡決定
     if entry.level == "sandbox":
-        if confidence_score >= CONFIDENCE_THRESHOLD_AUTO and entry.needs_signoff is False:
-            # 有信心但 policy(b) 鎖住 → 設 needs_signoff=True，仍回 sandbox
-            return "sandbox"
         return "sandbox"
 
-    # 已在 auto（正常流程不會到這，因為 policy(b) 鎖住自動升）
+    # level == "auto"：已經 Ryan 簽核過（signoff_auto 才寫得進來）
     return "auto"
 
 

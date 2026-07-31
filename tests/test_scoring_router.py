@@ -164,10 +164,49 @@ class TestScoring:
         assert v.lane == "human", f"escaping class should be human, got {v.lane}"
 
     def test_containable_new_class_is_human(self):
-        """全新 containable 類因信心低 → human。"""
+        """全新 containable 類（ratchet 沒這筆）→ human，人先看過再放進沙箱。"""
         req = ActionRequest(action_id="t2", task_class="file_write")
         v = score(req)
         assert v.lane == "human", f"new class should be human, got {v.lane}"
+
+    def test_seeded_sandbox_class_enters_sandbox_with_zero_samples(self):
+        """冷啟動死鎖回歸測試（2026-07-31）。
+
+        ratchet 把某類 seed 在 level=sandbox 但一筆樣本都沒有時，必須真的進
+        sandbox。舊版拿信心分擋沙箱，0 樣本 → 信心 0 → 永遠 human → 永遠拿不到
+        樣本 → verified_count 永遠 0。整條 canary 落地路徑就卡死在這裡。
+        """
+        entry = RatchetEntry(task_class="compute_draft", level="sandbox")
+        assert entry.total == 0
+        save_ratchet({"compute_draft": entry})
+
+        v = score(ActionRequest(action_id="cold-1", task_class="compute_draft"))
+        assert v.lane == "sandbox", f"seeded sandbox class deadlocked in {v.lane}"
+
+    def test_downgraded_human_class_still_needs_confidence(self):
+        """降級到 human 的類不會被上面那條放行 —— 降級是懲罰，要 Ryan 手動重置。"""
+        entry = RatchetEntry(task_class="file_write", level="human",
+                             verified_count=1, failed_count=9)
+        save_ratchet({"file_write": entry})
+
+        v = score(ActionRequest(action_id="down-1", task_class="file_write"))
+        assert v.lane == "human", f"downgraded class should stay human, got {v.lane}"
+
+    def test_signed_off_auto_class_goes_auto(self):
+        """level=auto 只有 signoff_auto 寫得進來，寫進來就該走 auto。"""
+        entry = RatchetEntry(task_class="local_test", level="auto", needs_signoff=False)
+        save_ratchet({"local_test": entry})
+
+        v = score(ActionRequest(action_id="auto-1", task_class="local_test"))
+        assert v.lane == "auto", f"signed-off class should be auto, got {v.lane}"
+
+    def test_escaping_class_ignores_seeded_level(self):
+        """可回退性是硬地板：就算 ratchet 把 escaping 類 seed 成 auto 也不放行。"""
+        entry = RatchetEntry(task_class="network_call", level="auto", needs_signoff=False)
+        save_ratchet({"network_call": entry})
+
+        v = score(ActionRequest(action_id="esc-1", task_class="network_call"))
+        assert v.lane == "human", f"escaping must stay human, got {v.lane}"
 
     def test_containable_with_history_goes_to_sandbox(self):
         """有 ratchet 履歷的 containable 類 → sandbox。"""
